@@ -1,6 +1,17 @@
 {
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "api/widget.html"
+    }
+  },
   "routes": [
-    { "src": "/api/data", "dest": "/api/data.js" },
-    { "src": "/(.*)",     "dest": "/api/index.js" }
+    {
+      "src": "/api/data",
+      "dest": "/api/data.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.js"
+    }
   ]
 }
