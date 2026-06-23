@@ -1,8 +1,9 @@
 // Budget widget entry point — handles both GET and POST (Aspro miniapp mechanism)
 module.exports = function handler(req, res) {
+  res.statusCode = 200;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
-  res.send(HTML);
+  res.end(HTML);
 };
 
 const HTML = `<!DOCTYPE html>
@@ -424,4 +425,4 @@ const HTML = `<!DOCTYPE html>
 })();
 </script>
 </body>
-</html>`;Б/реьдЮ]ж
+</html>`;
