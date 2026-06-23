@@ -29,7 +29,11 @@ module.exports = async function handler(req, res) {
     res.end(JSON.stringify(body));
   }
 
-  const entity = req.query.entity;
+  // Read entity from raw query string (req.query may parse brackets into nested objects)
+  const rawQuery = (req.url || '').split('?')[1] || '';
+  const rawParams = new URLSearchParams(rawQuery);
+  const entity = rawParams.get('entity');
+
   if (!ALLOWED.includes(entity)) {
     return send(400, { error: 'entity not allowed' });
   }
@@ -40,14 +44,11 @@ module.exports = async function handler(req, res) {
     return send(500, { error: 'ASPRO_DOMAIN / ASPRO_API_KEY not set' });
   }
 
-  // Pass through all query params except 'entity', append api_key
-  const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(req.query)) {
-    if (k !== 'entity') params.append(k, v);
-  }
-  params.append('api_key', apiKey);
+  // Forward raw query string as-is (preserves filter[date][start_date] etc.), strip entity, add api_key
+  rawParams.delete('entity');
+  rawParams.append('api_key', apiKey);
 
-  const url = 'https://' + domain + '/api/v1/module/fin/' + entity + '/list?' + params.toString();
+  const url = 'https://' + domain + '/api/v1/module/fin/' + entity + '/list?' + rawParams.toString();
 
   try {
     const data = await httpsGet(url);
