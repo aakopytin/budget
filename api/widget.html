@@ -63,10 +63,11 @@
   // ── Справочники ────────────────────────────────────────────────
   var PID_MAP = {
     1:'Кемерово', 6:'Десногорск', 12:'Киров', 23:'Сыктывкар', 13:'Барнаул',
-    9:'Рузаевка', 3:'Ю-Сахалинск', 25:'Ю-Сахалинск', 7:'Иволгинск',
+    9:'Рузаевка', 3:'Ю-Сахалинск', 7:'Иволгинск',
     2:'Центр. договор', 18:'Центр. договор', 19:'Центр. договор',
     29:'Центр. договор', 30:'Центр. договор', 31:'Центр. договор', 32:'Центр. договор',
-    22:'Прочие', 20:'Прочие', 17:'Прочие', 21:'Прочие',
+    33:'Центр. договор',
+    4:'Прочие', 22:'Прочие', 20:'Прочие', 17:'Прочие', 21:'Прочие',
     24:'ОХР (ВСИП+ТТ)', 26:'ОХР (ВСИП+ТТ)'
   };
 
@@ -117,7 +118,7 @@
     }
     var absV = Math.abs(v) / 1000;
     var parts = absV.toFixed(1).split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     var s = parts.join('.');
     if (resColor) {
       var c = v >= 0 ? '#6ee7b7' : '#fca5a5';
@@ -182,11 +183,10 @@
     });
   }
 
-  function fetchTxns(from, to) {
-    return fetchAll('transaction', {
-      'filter[date][start_date]': from,
-      'filter[date][end_date]': to
-    });
+  function fetchTxns() {
+    // Aspro filter[date] does exact-match on start_date only — range filtering is broken.
+    // Fetch all transactions; calcFact filters by year client-side.
+    return fetchAll('transaction');
   }
 
   // ── Расчёт факта ───────────────────────────────────────────────
@@ -384,10 +384,6 @@
     var statusEl  = document.getElementById('status');
     var contentEl = document.getElementById('content');
     var now = new Date(), yr = now.getFullYear(), mo = now.getMonth() + 1;
-    var dd   = String(now.getDate()).padStart(2, '0');
-    var mm   = String(mo).padStart(2, '0');
-    var from = (yr - 1) + '-01-01';
-    var to   = yr + '-' + mm + '-' + dd;
 
     statusEl.textContent = '● загрузка...';
     statusEl.style.color = '#d97706';
@@ -395,7 +391,7 @@
 
     var t0 = Date.now();
     Promise.all([
-      fetchTxns(from, to),
+      fetchTxns(),
       fetchPlanMoney(yr),
       fetchCategories()
     ]).then(function(results) {
@@ -406,7 +402,7 @@
       var pm  = calcPlan(planItems, yr, mo);
       contentEl.innerHTML = buildTable(acc, pm, yr, mo);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-      statusEl.innerHTML = '● live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
+      statusEl.innerHTML = '● live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
       loading = false;
     }).catch(function(err) {
