@@ -66,14 +66,14 @@
     9:'Рузаевка', 3:'Ю-Сахалинск', 7:'Иволгинск',
     2:'Центр. договор', 18:'Центр. договор', 19:'Центр. договор',
     29:'Центр. договор', 30:'Центр. договор', 31:'Центр. договор', 32:'Центр. договор',
-    33:'Центр. договор',
+    33:'Голутвинский',
     4:'Прочие', 22:'Прочие', 20:'Прочие', 17:'Прочие', 21:'Прочие',
     24:'ОХР (ВСИП+ТТ)', 26:'ОХР (ВСИП+ТТ)'
   };
 
   var PROJECTS = [
     'Кемерово','Десногорск','Киров','Сыктывкар','Барнаул',
-    'Рузаевка','Ю-Сахалинск','Иволгинск','Центр. договор','Прочие','ОХР (ВСИП+ТТ)'
+    'Рузаевка','Ю-Сахалинск','Иволгинск','Голутвинский','Центр. договор','Прочие','ОХР (ВСИП+ТТ)'
   ];
 
   var SKIP = {
@@ -118,7 +118,7 @@
     }
     var absV = Math.abs(v) / 1000;
     var parts = absV.toFixed(1).split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     var s = parts.join('.');
     if (resColor) {
       var c = v >= 0 ? '#6ee7b7' : '#fca5a5';
@@ -402,7 +402,7 @@
       var pm  = calcPlan(planItems, yr, mo);
       contentEl.innerHTML = buildTable(acc, pm, yr, mo);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-      statusEl.innerHTML = '● live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
+      statusEl.innerHTML = '● live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
       loading = false;
     }).catch(function(err) {
