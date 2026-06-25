@@ -60,16 +60,11 @@
 (function () {
   'use strict';
 
-  // Банковские счета для расчёта остатков
-  var VSIP_ACCS = {
-    'Альфа ВСИП':1,
-    'ВСИП Депозиты':1,
-    'Счет ВТБ':1,
-    'Счет РХСБ':1,
-    'Счет Сбербанк':1,
-    'Счет Совкомбанк':1
-  };
-  var TT_ACCS = {'Альфа ТТ (ВСИП)':1};
+  // Банковские счета для расчёта остатков (org_account_id)
+  // ВСИП: 2-Альфа, 4-Совком, 5-РХСБ, 6-Сбер, 7-ВТБ, 8-Депозиты
+  // ТТ:   18-Альфа ТТ (ВСИП)
+  var VSIP_ACC_IDS = {2:1, 4:1, 5:1, 6:1, 7:1, 8:1};
+  var TT_ACC_IDS   = {18:1};
 
   // Справочники проектов
   var PID_MAP = {
@@ -223,14 +218,6 @@
     });
   }
 
-  function fetchBankAccounts() {
-    return fetchAll('bank_account').then(function(items) {
-      var map = {};
-      items.forEach(function(a) { map[a.id] = a.name || ''; });
-      return map;
-    });
-  }
-
   function fetchPlanMoney(curYear) {
     return fetchAll('plan_money').then(function(items) {
       return items.filter(function(i) {
@@ -242,7 +229,7 @@
   }
 
   // Расчёт факта + остатки + финансовая деятельность
-  function calcFact(txns, catMap, accMap, curYear, curMonth) {
+  function calcFact(txns, catMap, curYear, curMonth) {
     var now   = new Date();
     var today = now.getFullYear() + '-' + pad2(now.getMonth()+1) + '-' + pad2(now.getDate());
     var jan1  = curYear + '-01-01';
@@ -270,12 +257,12 @@
       var expAmt = parseFloat(tx.outcome) || 0;
 
       // Остатки по всем транзакциям банковских счетов
-      var an = accMap[tx.org_account_id] || '';
-      if (VSIP_ACCS[an]) {
+      var aid = tx.org_account_id;
+      if (VSIP_ACC_IDS[aid]) {
         if (dt < jan1)   vSt  += incAmt - expAmt;
         if (dt <= today) vEnd += incAmt - expAmt;
       }
-      if (TT_ACCS[an]) {
+      if (TT_ACC_IDS[aid]) {
         if (dt < jan1)   tSt  += incAmt - expAmt;
         if (dt <= today) tEnd += incAmt - expAmt;
       }
@@ -617,14 +604,12 @@
     Promise.all([
       fetchAll('transaction'),
       fetchPlanMoney(yr),
-      fetchCategories(),
-      fetchBankAccounts()
+      fetchCategories()
     ]).then(function(results) {
       var txns      = results[0];
       var planItems = results[1];
       var catMap    = results[2];
-      var accMap    = results[3];
-      var factResult = calcFact(txns, catMap, accMap, yr, mo);
+      var factResult = calcFact(txns, catMap, yr, mo);
       var pm         = calcPlan(planItems, yr, mo);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
