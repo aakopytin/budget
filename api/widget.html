@@ -77,6 +77,7 @@
     3:'Ю-Сахалинск',
     25:'Ю-Сахалинск',
     7:'Иволгинск',
+    10:'Большое Болдино',
     2:'Центр. договор',
     18:'Центр. договор',
     19:'Центр. договор',
@@ -103,6 +104,7 @@
     'Рузаевка',
     'Ю-Сахалинск',
     'Иволгинск',
+    'Большое Болдино',
     'Голутвинский',
     'Центр. договор',
     'Прочие',
@@ -493,10 +495,9 @@
       return '<tr style="font-size:10.5px' + bg + '">'
         + TD(dash())
         + TD(dash(), ';color:#9ca3af')
-        + TD(dash(), SEP)
-        + TDl(total ? '<strong>' + lbl + '</strong>' : lbl, ';color:#374151')
+        + TDl(total ? '<strong>' + lbl + '</strong>' : lbl, SEP + ';color:#374151')
         + TD(fmtBal(v, total), '')
-        + TD(dash())
+        + TD(dash()) + TD(dash())
         + TD(dash(), SEP) + TD(dash())
         + planEmpty()
         + '</tr>';
