@@ -379,6 +379,8 @@
       return TD(dash(), SEP) + TD(dash()) + TD(dash()) + TD(dash()) + TD(dash()) + TD(dash());
     }
 
+    var curPlanIdx = (curMonth >= 7) ? curMonth - 7 : -1;
+
     function getBudget(p, type) {
       var a = acc[p], d = pm[p];
       return type === 'inc'
@@ -419,8 +421,8 @@
         + TD(fmtK(f25), SEP) + TD(fmtK(f26))
         + TD(fmtK(fact, true))
         + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
-        + TD(dash(), SEP) + TD(fmtK(fCur))
-        + plan.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
+        + TD(fmtK(h), SEP) + TD(fmtK(fCur))
+        + plan.map(function(v, i) { return TD(i === curPlanIdx ? dash() : fmtK(v), i === 0 ? SEP : ''); }).join('')
         + '</tr>';
     }
 
@@ -432,8 +434,8 @@
         + TD(fmtK(t.f25, true), SEP + BT) + TD(fmtK(t.f26, true), BT)
         + TD(fmtK(t.fact, true), BT)
         + TD(fmtK(t.ost, true, true), (t.ost < 0 ? ';color:#dc2626' : '') + BT)
-        + TD(dash(), SEP + BT) + TD(fmtK(t.fCur, true), BT)
-        + t.plan.map(function(v, i) { return TD(fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
+        + TD(fmtK(t.fH, true), SEP + BT) + TD(fmtK(t.fCur, true), BT)
+        + t.plan.map(function(v, i) { return TD(i === curPlanIdx ? dash() : fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
         + '</tr>';
     }
 
@@ -568,6 +570,11 @@
       + TD(dash(), BT) + TD(dash(), BT) + TD(dash(), BT)
       + '</tr>'
 
+      // Закрывающий остаток на текущую дату
+      + balCloseRow('ВСИП', vEnd, false)
+      + balCloseRow('ТТ', tEnd, false)
+      + balCloseRow('ИТОГО', tEnd0, true)
+
       // КОНТРОЛЬНАЯ СУММА
       + '<tr style="background:#1e3a5f">'
       + TDl('<strong style="color:#fff">' + (cOk ? '&#10003; Контрольная сумма' : '&#9888; Контрольная сумма') + '</strong>', BT2)
@@ -579,11 +586,6 @@
       + TD(dash(), BL2 + BT2) + TD(dash(), BT2) + TD(dash(), BT2)
       + TD(dash(), BT2) + TD(dash(), BT2) + TD(dash(), BT2)
       + '</tr>'
-
-      // Закрывающий остаток на текущую дату
-      + balCloseRow('ВСИП', vEnd, false)
-      + balCloseRow('ТТ', tEnd, false)
-      + balCloseRow('ИТОГО', tEnd0, true)
 
       + '</tbody></table>';
   }
