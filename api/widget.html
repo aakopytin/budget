@@ -296,19 +296,19 @@
       // Финансовая деятельность — только проекты 24 и 26
       if (OXR_PIDS[tx.project_id]) {
         if (typeName === 'Получение кредита' && incAmt > 0) {
-          fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
+          if (isPrev || dt <= cutoffDate) fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
         }
         if (typeName === 'Выплата кредита' && expAmt > 0) {
-          fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
+          if (isPrev || dt <= cutoffDate) fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
         }
         if (typeName === 'Проценты к уплате' && expAmt > 0) {
-          fin.int[fKey]   += expAmt; if (isCur) fin.int.fCur   += expAmt;
+          if (isPrev || dt <= cutoffDate) fin.int[fKey]   += expAmt; if (isCur) fin.int.fCur   += expAmt;
         }
         if (typeName === 'Перевод между счетами (поступление)' && incAmt > 0) {
-          fin.trIn[fKey]  += incAmt; if (isCur) fin.trIn.fCur  += incAmt;
+          if (isPrev || dt <= cutoffDate) fin.trIn[fKey]  += incAmt; if (isCur) fin.trIn.fCur  += incAmt;
         }
         if (typeName === 'Перевод между счетами (списание)' && expAmt > 0) {
-          fin.trOut[fKey] += expAmt; if (isCur) fin.trOut.fCur += expAmt;
+          if (isPrev || dt <= cutoffDate) fin.trOut[fKey] += expAmt; if (isCur) fin.trOut.fCur += expAmt;
         }
       }
 
@@ -316,11 +316,11 @@
       var a = acc[proj];
       if (incAmt > 0 && isIncome(typeName)) {
         if (isPrev) { a.i25 += incAmt; }
-        else { a.i26 += incAmt; if (isCur) a.iCur += incAmt; }
+        else if (dt <= cutoffDate) { a.i26 += incAmt; if (isCur) a.iCur += incAmt; }
       }
       if (expAmt > 0 && isExpense(typeName, proj)) {
         if (isPrev) { a.e25 += expAmt; }
-        else { a.e26 += expAmt; if (isCur) a.eCur += expAmt; }
+        else if (dt <= cutoffDate) { a.e26 += expAmt; if (isCur) a.eCur += expAmt; }
       }
     });
 
