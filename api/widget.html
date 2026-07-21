@@ -24,15 +24,6 @@
   .subtitle { font-size: 10px; color: #9ca3af; margin-left: 8px; }
   .status-row { display: flex; gap: 6px; align-items: center; }
   #status { font-size: 10.5px; color: #d97706; }
-  #date-pick {
-    font-size: 11px;
-    border: 1px solid #d1d5db;
-    border-radius: 4px;
-    padding: 2px 4px;
-    color: #374151;
-    background: #fff;
-    cursor: pointer;
-  }
   #refresh-btn {
     background: none;
     border: 1px solid #d1d5db;
@@ -57,7 +48,6 @@
   </div>
   <div class="status-row">
     <span id="status">&#9679; инициализация...</span>
-    <input type="date" id="date-pick" title="Дата среза факта">
     <button id="refresh-btn" title="Обновить">&#8635;</button>
   </div>
 </div>
@@ -162,7 +152,6 @@
   }
 
   var MS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-  var PM_MONTHS = ['Июл','Авг','Сен','Окт','Ноя','Дек'];
 
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
@@ -171,7 +160,7 @@
     if (!v) return '<span style="color:#ccc">—</span>';
     var absV = Math.abs(v) / 1000;
     var parts = absV.toFixed(1).split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     var s = parts.join('.');
     var isNeg = v < 0;
     var wrapped = isNeg ? '(' + s + ')' : s;
@@ -187,7 +176,7 @@
     if (!v && v !== 0) return '<span style="color:#ccc">—</span>';
     var absV = Math.abs(v) / 1000;
     var parts = absV.toFixed(1).split('.');
-    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     var s = parts.join('.');
     var isNeg = v < 0;
     var wrapped = isNeg ? '(' + s + ')' : s;
@@ -242,9 +231,10 @@
   }
 
   // Расчёт факта + остатки + финансовая деятельность
-  // cutoffDate: 'YYYY-MM-DD' — дата среза для остатков и "текущего месяца"
-  function calcFact(txns, catMap, curYear, curMonth, cutoffDate) {
-    var jan1 = curYear + '-01-01';
+  function calcFact(txns, catMap, curYear, curMonth) {
+    var now   = new Date();
+    var today = now.getFullYear() + '-' + pad2(now.getMonth()+1) + '-' + pad2(now.getDate());
+    var jan1  = curYear + '-01-01';
 
     var acc = {};
     PROJECTS.forEach(function(p) {
@@ -253,11 +243,11 @@
 
     // Финансовая деятельность (только проекты 24 и 26)
     var fin = {
-      skIn:  { f25:0, f26:0, fCur:0 },
-      skOut: { f25:0, f26:0, fCur:0 },
-      int:   { f25:0, f26:0, fCur:0 },
-      trIn:  { f25:0, f26:0, fCur:0 },
-      trOut: { f25:0, f26:0, fCur:0 }
+      skIn:  { f25:0, f26:0, fCur:0 },   // Получение займов
+      skOut: { f25:0, f26:0, fCur:0 },   // Выдача займов
+      int:   { f25:0, f26:0, fCur:0 },   // Процентные расходы
+      trIn:  { f25:0, f26:0, fCur:0 },   // Переводы поступление
+      trOut: { f25:0, f26:0, fCur:0 }    // Переводы списание
     };
 
     // Остатки по банковским счетам
@@ -268,15 +258,15 @@
       var incAmt = parseFloat(tx.income)  || 0;
       var expAmt = parseFloat(tx.outcome) || 0;
 
-      // Остатки: накапливаем до cutoffDate
+      // Остатки по всем транзакциям банковских счетов
       var aid = tx.org_account_id;
       if (VSIP_ACC_IDS[aid]) {
-        if (dt < jan1)        vSt  += incAmt - expAmt;
-        if (dt <= cutoffDate) vEnd += incAmt - expAmt;
+        if (dt < jan1)   vSt  += incAmt - expAmt;
+        if (dt <= today) vEnd += incAmt - expAmt;
       }
       if (TT_ACC_IDS[aid]) {
-        if (dt < jan1)        tSt  += incAmt - expAmt;
-        if (dt <= cutoffDate) tEnd += incAmt - expAmt;
+        if (dt < jan1)   tSt  += incAmt - expAmt;
+        if (dt <= today) tEnd += incAmt - expAmt;
       }
 
       // Только текущий и прошлый год для факта
@@ -289,26 +279,25 @@
       if (!proj) return;
 
       var isPrev = (yr === curYear - 1);
-      // Текущий месяц — только транзакции не позже cutoffDate
-      var isCur  = (yr === curYear && mo === curMonth && dt <= cutoffDate);
+      var isCur  = (yr === curYear && mo === curMonth);
       var fKey   = isPrev ? 'f25' : 'f26';
 
       // Финансовая деятельность — только проекты 24 и 26
       if (OXR_PIDS[tx.project_id]) {
         if (typeName === 'Получение кредита' && incAmt > 0) {
-          if (isPrev || dt <= cutoffDate) fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
+          fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
         }
         if (typeName === 'Выплата кредита' && expAmt > 0) {
-          if (isPrev || dt <= cutoffDate) fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
+          fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
         }
         if (typeName === 'Проценты к уплате' && expAmt > 0) {
-          if (isPrev || dt <= cutoffDate) fin.int[fKey]   += expAmt; if (isCur) fin.int.fCur   += expAmt;
+          fin.int[fKey]   += expAmt; if (isCur) fin.int.fCur   += expAmt;
         }
         if (typeName === 'Перевод между счетами (поступление)' && incAmt > 0) {
-          if (isPrev || dt <= cutoffDate) fin.trIn[fKey]  += incAmt; if (isCur) fin.trIn.fCur  += incAmt;
+          fin.trIn[fKey]  += incAmt; if (isCur) fin.trIn.fCur  += incAmt;
         }
         if (typeName === 'Перевод между счетами (списание)' && expAmt > 0) {
-          if (isPrev || dt <= cutoffDate) fin.trOut[fKey] += expAmt; if (isCur) fin.trOut.fCur += expAmt;
+          fin.trOut[fKey] += expAmt; if (isCur) fin.trOut.fCur += expAmt;
         }
       }
 
@@ -316,11 +305,11 @@
       var a = acc[proj];
       if (incAmt > 0 && isIncome(typeName)) {
         if (isPrev) { a.i25 += incAmt; }
-        else if (dt <= cutoffDate) { a.i26 += incAmt; if (isCur) a.iCur += incAmt; }
+        else { a.i26 += incAmt; if (isCur) a.iCur += incAmt; }
       }
       if (expAmt > 0 && isExpense(typeName, proj)) {
         if (isPrev) { a.e25 += expAmt; }
-        else if (dt <= cutoffDate) { a.e26 += expAmt; if (isCur) a.eCur += expAmt; }
+        else { a.e26 += expAmt; if (isCur) a.eCur += expAmt; }
       }
     });
 
@@ -328,7 +317,7 @@
   }
 
   // Расчёт плана
-  function calcPlan(planItems, curYear, curMonth) {
+  function calcPlan(planItems, curYear, curMonth, nextMonths) {
     var pm = {};
     PROJECTS.forEach(function(p) {
       pm[p] = { bi_plan:0, be_plan:0, hI:0, hE:0,
@@ -350,28 +339,26 @@
         if (isI) d.hI += val;
         if (isE) d.hE += val;
       }
-      if (iy === curYear && im >= 7 && im <= 12) {
-        var idx = im - 7;
-        if (isI) d.plan_i[idx] += val;
-        if (isE) d.plan_e[idx] += val;
-      }
+      nextMonths.forEach(function(nm, idx) {
+        if (iy === nm.year && im === nm.month) {
+          if (isI) d.plan_i[idx] += val;
+          if (isE) d.plan_e[idx] += val;
+        }
+      });
     });
     return pm;
   }
 
   // Построение таблицы
-  // cutoffDate: 'YYYY-MM-DD' — отображается в заголовке закрывающего остатка
-  function buildTable(result, pm, curYear, curMonth, cutoffDate) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths) {
     var acc  = result.acc;
     var fin  = result.fin;
     var vSt  = result.vSt,  tSt  = result.tSt;
     var vEnd = result.vEnd, tEnd = result.tEnd;
     var tSt0 = vSt + tSt, tEnd0 = vEnd + tEnd;
 
-    // Форматируем cutoffDate в DD.MM.YYYY для отображения
-    var cutoffParts = cutoffDate.split('-');
-    var cutoffStr = cutoffParts[2] + '.' + cutoffParts[1] + '.' + cutoffParts[0];
-
+    var now       = new Date();
+    var todayStr  = pad2(now.getDate()) + '.' + pad2(now.getMonth()+1) + '.' + now.getFullYear();
     var jan1Str   = '01.01.' + curYear;
     var curMon    = MS[curMonth - 1];
     var prevYear  = curYear - 1;
@@ -473,7 +460,8 @@
 
     var ti = totals('inc'), te = totals('exp');
 
-    // Контрольная сумма
+    // Контрольная сумма:
+    // Остаток_нач + Доходы_26 + ФинПриход_26 - Расходы_26 - ФинРасход_26 = Остаток_кон
     var finIn26  = fin.skIn.f26  + fin.trIn.f26;
     var finOut26 = fin.skOut.f26 + fin.int.f26 + fin.trOut.f26;
     var ctrl = tSt0 + (ti.f26 + finIn26) - (te.f26 + finOut26) - tEnd0;
@@ -485,7 +473,7 @@
       return '<tr style="background:' + bg + '"><td colspan="14" style="padding:4px 8px;font-weight:700;font-size:11.5px;color:' + color + ';border-bottom:1px solid ' + border + '">' + text + '</td></tr>';
     };
 
-    // Строка начального остатка
+    // Строка начального остатка: метка в кол.3, значение в кол.4
     function balOpenRow(entity, v, total) {
       var lbl = 'Остаток на ' + jan1Str + ' · ' + entity;
       var bg  = total ? ';background:#d1e8ff' : '';
@@ -500,9 +488,9 @@
         + '</tr>';
     }
 
-    // Строка закрывающего остатка — показывает cutoffStr
+    // Строка закрывающего остатка: метка в кол.4, значение в кол.5
     function balCloseRow(entity, v, total) {
-      var lbl = 'Остаток на ' + cutoffStr + ' · ' + entity;
+      var lbl = 'Остаток на ' + todayStr + ' · ' + entity;
       var bg  = total ? ';background:#d1e8ff' : '';
       return '<tr style="font-size:10.5px' + bg + '">'
         + TD(dash())
@@ -524,7 +512,7 @@
 
     var ctrlStr = (function() {
       var absV = Math.abs(ctrl) / 1000;
-      var s = absV.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+      var s = absV.toFixed(1).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
       return ctrl < 0 ? '(' + s + ')' : s;
     })();
 
@@ -543,7 +531,7 @@
       + TH(yearLabel)
       + TH('Итого') + TH('Остаток')
       + TH('Бюджет', SEP) + TH('Факт')
-      + PM_MONTHS.map(function(m, i) { return TH(m, i === 0 ? SEP : ''); }).join('')
+      + nextMonths.map(function(nm, i) { return TH(MS[nm.month-1] + (nm.year !== curYear ? ' \'' + String(nm.year).slice(2) : ''), i === 0 ? SEP : ''); }).join('')
       + '</tr>'
       + '</thead>'
       + '<tbody>'
@@ -580,7 +568,7 @@
       + TD(dash(), BT) + TD(dash(), BT) + TD(dash(), BT)
       + '</tr>'
 
-      // Закрывающий остаток на cutoffStr
+      // Закрывающий остаток на текущую дату
       + balCloseRow('ВСИП', vEnd, false)
       + balCloseRow('ТТ', tEnd, false)
       + balCloseRow('ИТОГО', tEnd0, true)
@@ -600,74 +588,50 @@
       + '</tbody></table>';
   }
 
-  // Кешированные данные для пересчёта без повторной загрузки
-  var cache = { txns: null, planItems: null, catMap: null, yr: 0, mo: 0, loadedAt: null };
+  // Загрузка
   var loading = false;
-
-  // Пересчёт по кешу с новой датой среза
-  function recalc(cutoffDate) {
-    if (!cache.txns) return;
-    var factResult = calcFact(cache.txns, cache.catMap, cache.yr, cache.mo, cutoffDate);
-    var pm = calcPlan(cache.planItems, cache.yr, cache.mo);
-    document.getElementById('content').innerHTML = buildTable(factResult, pm, cache.yr, cache.mo, cutoffDate);
-  }
 
   function load() {
     if (loading) return;
     loading = true;
     var statusEl  = document.getElementById('status');
     var contentEl = document.getElementById('content');
-    var now = new Date();
-    var yr = now.getFullYear(), mo = now.getMonth() + 1;
+    var now = new Date(), yr = now.getFullYear(), mo = now.getMonth() + 1;
 
-    statusEl.textContent = '● загрузка...';
+    statusEl.textContent = '&#9679; загрузка...';
     statusEl.style.color = '#d97706';
-    contentEl.innerHTML  = '<div style="padding:20px;text-align:center;color:#6b7280">⏳ Загружаем данные...</div>';
+    contentEl.innerHTML  = '<div style="padding:20px;text-align:center;color:#6b7280">&#8987; Загружаем данные...</div>';
 
     var t0 = Date.now();
+    // Следующие 6 месяцев после текущего (не включая текущий), с переходом в следующий год
+    var nextMonths = [];
+    for (var i = 0; i < 6; i++) {
+      var nm = mo + 1 + i, ny = yr;
+      if (nm > 12) { nm -= 12; ny++; }
+      nextMonths.push({year: ny, month: nm});
+    }
     Promise.all([
       fetchAll('transaction'),
       fetchPlanMoney(yr),
       fetchCategories()
     ]).then(function(results) {
-      cache.txns = results[0];
-      cache.planItems = results[1];
-      cache.catMap = results[2];
-      cache.yr = yr;
-      cache.mo = mo;
-      cache.loadedAt = now;
-
-      var cutoffDate = document.getElementById('date-pick').value;
-      var factResult = calcFact(cache.txns, cache.catMap, yr, mo, cutoffDate);
-      var pm = calcPlan(cache.planItems, yr, mo);
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, cutoffDate);
-
+      var txns      = results[0];
+      var planItems = results[1];
+      var catMap    = results[2];
+      var factResult = calcFact(txns, catMap, yr, mo);
+      var pm         = calcPlan(planItems, yr, mo, nextMonths);
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-      statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + cache.txns.length + ' тр. · ' + elapsed + 'с';
+      statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
       loading = false;
     }).catch(function(err) {
       contentEl.innerHTML = '<div style="padding:16px;color:#dc2626">&#10060; Ошибка: ' + err.message + '</div>';
-      statusEl.textContent = '● ошибка';
+      statusEl.textContent = '&#9679; ошибка';
       statusEl.style.color = '#dc2626';
       loading = false;
     });
   }
-
-  // Инициализация date picker: текущий месяц, по умолчанию — сегодня
-  (function initDatePick() {
-    var now = new Date();
-    var today = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
-    var mon1  = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-01';
-    var dp = document.getElementById('date-pick');
-    dp.value = today;
-    dp.min   = mon1;
-    dp.max   = today;
-  })();
-
-  document.getElementById('date-pick').addEventListener('change', function() {
-    recalc(this.value);
-  });
 
   document.getElementById('refresh-btn').addEventListener('click', function() {
     loading = false;
