@@ -287,13 +287,14 @@
   }
 
   // API через серверный прокси /api/data
-  function fetchAll(entity) {
+  function fetchAll(entity, extra) {
     var all = [], page = 1;
     function next() {
       var p = new URLSearchParams();
       p.append('entity', entity);
       p.append('limit', '100');
       p.append('page', String(page));
+      if (extra) Object.keys(extra).forEach(function(k) { p.append(k, extra[k]); });
       return fetch('/api/data?' + p.toString())
         .then(function(r) {
           if (!r.ok) throw new Error(entity + ' HTTP ' + r.status);
@@ -330,14 +331,21 @@
     });
   }
 
-  // Загрузка PLS-записей (НДС) за curYear и год до
+  // Загрузка PLS-записей (НДС) за curYear и год до.
+  // Аспро возвращает разные категории только при явном filter[category_id].
+  // Запрос 1: без фильтра → 3157/3158 (исходящий/входящий НДС per-transaction).
+  // Запрос 2: filter 3144,3147 → фактические НДС-суммы платежей/поступлений (для eff rates).
   function fetchPls(curYear) {
-    return fetchAll('transaction_pls').then(function(items) {
-      return items.filter(function(i) {
+    var req1 = fetchAll('transaction_pls');
+    var req2 = fetchAll('transaction_pls', {'filter[category_id]': '3144,3147'});
+    return Promise.all([req1, req2]).then(function(res) {
+      var all = res[0].concat(res[1]);
+      return all.filter(function(i) {
         if (!i.date) return false;
         var iy = parseInt(i.date.substring(0, 4));
         return (iy === curYear || iy === curYear - 1)
-            && (i.category_id === 3158 || i.category_id === 3157 || i.category_id === 3144);
+            && (i.category_id === 3158 || i.category_id === 3157
+             || i.category_id === 3144 || i.category_id === 3147);
       });
     });
   }
