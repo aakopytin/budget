@@ -35,12 +35,12 @@ module.exports = async function handler(req, res) {
   const q = req.query || {};
 
   // Build Aspro URL directly — no entity/ALLOWED indirection
+  // NOTE: date + category_id filters together return 0 in Aspro API.
+  // Use only category filter; client-side date filtering is done in widget.html.
   const params = new URLSearchParams();
   params.append('api_key', apiKey);
   params.append('limit', '100');
   params.append('page', q.page || '1');
-  if (q.start) params.append('filter[date][start_date]', q.start);
-  if (q.end)   params.append('filter[date][end_date]',   q.end);
   params.append('filter[category_id]', '3144');
 
   const url = 'https://' + domain + '/api/v1/module/fin/transaction_pls/list?' + params.toString();
