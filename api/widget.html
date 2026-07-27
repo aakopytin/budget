@@ -337,7 +337,7 @@
         if (!i.date) return false;
         var iy = parseInt(i.date.substring(0, 4));
         return (iy === curYear || iy === curYear - 1)
-            && (i.category_id === 3158 || i.category_id === 3157);
+            && (i.category_id === 3158 || i.category_id === 3157 || i.category_id === 3144);
       });
     });
   }
@@ -561,16 +561,17 @@
     var dalYM = dalY * 100 + dalM;
 
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
-    // Строим карту по tx.id и tx.reference_id → catType (оба варианта на случай разных API)
+    // Алгоритм как в nds.js: tx.reference_id → catType, PLS 3144 тоже ищет по reference_id.
+    // Обе записи (транзакция и PLS) разделяют один и тот же reference_id документа.
     var refCatTypeMap = {};
     txns.forEach(function(tx) {
+      if (!tx.reference_id) return;
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
       var catName = catMap[tx.category_id] || '';
       var t = getExpCatType(catName);
       if (!t || t === 'zero') return;
-      if (tx.id)           refCatTypeMap[tx.id]           = t;
-      if (tx.reference_id) refCatTypeMap[tx.reference_id] = t;
+      refCatTypeMap[tx.reference_id] = t;
     });
 
     // Суммируем фактические расходы и НДС по типам
@@ -585,12 +586,12 @@
       if (!t || t === 'zero') return;
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
+    // PLS 3144 — НДС входящий (вычет): reference_id совпадает с tx.reference_id
     (plsItems || []).forEach(function(p) {
-      if (p.category_id !== 3157) return;
+      if (p.category_id !== 3144) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
-      // Пробуем оба поля для привязки к транзакции
-      var t = refCatTypeMap[p.reference_id] || refCatTypeMap[p.id];
+      var t = refCatTypeMap[p.reference_id];
       if (!t) return;
       effVatByType[t] = (effVatByType[t] || 0) + vatAmt;
     });
@@ -664,7 +665,8 @@
     console.log('[НДС-прогноз] effRates:', JSON.stringify(effRates));
     console.log('[НДС-прогноз] effExpByType:', JSON.stringify(effExpByType));
     console.log('[НДС-прогноз] effVatByType:', JSON.stringify(effVatByType));
-    console.log('[НДС-прогноз] plsItems 3157 count:', (plsItems||[]).filter(function(p){return p.category_id===3157;}).length);
+    console.log('[НДС-прогноз] plsItems 3144 count:', (plsItems||[]).filter(function(p){return p.category_id===3144;}).length);
+    console.log('[НДС-прогноз] refCatTypeMap keys:', Object.keys(refCatTypeMap).length);
     // ── Шаг 5: план — plan_money (org_account_id=36), эффективные ставки ─
     var augYM = curYear * 100 + (curMonth === 12 ? 1 : curMonth + 1);
     var augDebug = [];
