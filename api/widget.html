@@ -180,7 +180,7 @@
   // Ставки по умолчанию — применяются если нет фактических PLS-данных для данного типа
   var DEFAULT_EFF_RATES = {
     smr: 22/122, mat: 22/122, design: 22/122, bg: 0,
-    ar: 22/122, lz: 22/122, buh: 22/122, proj_other: 22/122, zero: 0
+    ar: 22/122, lz: 22/122, buh: 0, proj_other: 22/122, zero: 0
   };
 
   function isIncome(t) { return !!INC_TYPES[t]; }
@@ -609,11 +609,15 @@
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
     // Алгоритм как в nds.js: tx.reference_id → catType, PLS 3144 тоже ищет по reference_id.
     // Обе записи (транзакция и PLS) разделяют один и тот же reference_id документа.
+    // Ограничиваем период: только curYear и prevYear (совпадает с периодом plsItems).
+    var prevYear = curYear - 1;
     var refCatTypeMap = {};
     txns.forEach(function(tx) {
       if (!tx.reference_id) return;
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
+      if (txYear !== curYear && txYear !== prevYear) return;
       var catName = catMap[tx.category_id] || '';
       var t = getExpCatType(catName);
       if (!t || t === 'zero') return;
@@ -625,6 +629,8 @@
     txns.forEach(function(tx) {
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
+      if (txYear !== curYear && txYear !== prevYear) return;
       var catName = catMap[tx.category_id] || '';
       var expAmt = parseFloat(tx.outcome) || 0;
       if (!expAmt) return;
@@ -889,7 +895,7 @@
 
     // Таблица эффективных ставок
     var TYPES_LABELS = {smr:'СМР', mat:'Материалы', design:'Проектирование/Изыскание', ar:'Аренда', lz:'Лизинг', buh:'Бухгалтерия', proj_other:'Прочие проектные', bg:'Банк. гарантии', zero:'Без НДС'};
-    var DEFAULT_EFF_RATES_REF = {smr:22/122, mat:22/122, design:22/122, bg:0, ar:22/122, lz:22/122, buh:22/122, proj_other:22/122, zero:0};
+    var DEFAULT_EFF_RATES_REF = {smr:22/122, mat:22/122, design:22/122, bg:0, ar:22/122, lz:22/122, buh:0, proj_other:22/122, zero:0};
     var rateRows = '';
     var TS = 'padding:2px 6px;font-size:10px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151';
     var TSr = TS + ';text-align:right';
