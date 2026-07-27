@@ -674,6 +674,10 @@
     var finNetF26  = fin.skIn.f26  + fin.trIn.f26  - fin.skOut.f26  - fin.int.f26  - fin.trOut.f26;
     var finNetCur  = fin.skIn.fCur + fin.trIn.fCur - fin.skOut.fCur - fin.int.fCur - fin.trOut.fCur;
     var finNetTot  = finNetF25 + finNetF26;
+    // Плановое нетто финансовой деятельности (займы; переводы и % — без плана)
+    var fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]}, skOut:{hE:0,plan:[0,0,0,0,0,0]}};
+    var finNetPlanCur = fp.skIn.hI - fp.skOut.hE;
+    var finNetPlan    = fp.skIn.plan.map(function(v, i) { return v - fp.skOut.plan[i]; });
 
     var ti = totals('inc'), te = totals('exp');
 
@@ -694,16 +698,20 @@
     var vatOutCurPlan = Math.round(te.fH * effVatOut);
     var vatInTot  = vatD.in_25  + vatD.in_26;
     var vatOutTot = vatD.out_25 + vatD.out_26;
-    // Плановый остаток нарастающим итогом (нетто, без НДС)
+    // Плановый остаток нарастающим итогом (нетто по НДС + финансовая деятельность)
     var planBal_cur = Math.round(tEnd0
-      + (ti.fH - ti.fCur) * (1 - effVatIn)
-      - (te.fH - te.fCur) * (1 - effVatOut));
+      + (ti.fH - ti.fCur) * (1 - effVatIn)       // остаток план опер. поступлений
+      - (te.fH - te.fCur) * (1 - effVatOut)       // остаток план опер. выплат
+      + (fp.skIn.hI  - fin.skIn.fCur)             // остаток план получения займов
+      - (fp.skOut.hE - fin.skOut.fCur));           // остаток план выплаты займов
     var planBal = [0, 0, 0, 0, 0, 0];
     for (var bi = 0; bi < 6; bi++) {
       var bPrev = bi === 0 ? planBal_cur : planBal[bi - 1];
       planBal[bi] = Math.round(bPrev
         + ti.plan[bi] * (1 - effVatIn)
-        - te.plan[bi] * (1 - effVatOut));
+        - te.plan[bi] * (1 - effVatOut)
+        + fp.skIn.plan[bi]                         // плановое получение займов
+        - fp.skOut.plan[bi]);                      // плановая выплата займов
     }
 
     var yearLabel = curYear + '<br><span style="font-weight:400;font-size:9px">янв–' + curMon.toLowerCase() + '</span>';
@@ -840,9 +848,8 @@
       + TD(fmtK(finNetF25, true), SEP + BT) + TD(fmtK(finNetF26, true), BT)
       + TD(fmtK(finNetTot, true), BT)
       + TD(dash(), BT)
-      + TD(dash(), SEP + BT) + TD(fmtK(finNetCur, true), BT)
-      + TD(dash(), SEP + BT) + TD(dash(), BT) + TD(dash(), BT)
-      + TD(dash(), BT) + TD(dash(), BT) + TD(dash(), BT)
+      + TD(fmtK(finNetPlanCur, true), SEP + BT) + TD(fmtK(finNetCur, true), BT)
+      + finNetPlan.map(function(v, i) { return TD(fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
       + '</tr>'
 
       // Закрывающий остаток на текущую дату
