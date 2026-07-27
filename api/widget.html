@@ -609,15 +609,14 @@
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
     // Алгоритм как в nds.js: tx.reference_id → catType, PLS 3144 тоже ищет по reference_id.
     // Обе записи (транзакция и PLS) разделяют один и тот же reference_id документа.
-    // Ограничиваем период: только curYear и prevYear (совпадает с периодом plsItems).
-    var prevYear = curYear - 1;
+    // Ограничиваем период: только curYear (совпадает с периодом расчёта ставок).
     var refCatTypeMap = {};
     txns.forEach(function(tx) {
       if (!tx.reference_id) return;
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
       var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
-      if (txYear !== curYear && txYear !== prevYear) return;
+      if (txYear !== curYear) return;
       var catName = catMap[tx.category_id] || '';
       var t = getExpCatType(catName);
       if (!t || t === 'zero') return;
@@ -630,7 +629,7 @@
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
       var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
-      if (txYear !== curYear && txYear !== prevYear) return;
+      if (txYear !== curYear) return;
       var catName = catMap[tx.category_id] || '';
       var expAmt = parseFloat(tx.outcome) || 0;
       if (!expAmt) return;
@@ -641,6 +640,8 @@
     // PLS 3144 — НДС входящий (вычет): reference_id совпадает с tx.reference_id
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
+      var pYear = p.date ? parseInt(p.date.substring(0, 4)) : 0;
+      if (pYear !== curYear) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
       var t = refCatTypeMap[p.reference_id];
