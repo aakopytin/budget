@@ -120,6 +120,8 @@
     'Перевод между счетами (списание)': 1,
     'Получение кредита': 1,
     'Выплата кредита': 1,
+    'Получение займа': 1,
+    'Выплата займа': 1,
     'Проценты к уплате': 1
   };
 
@@ -133,11 +135,13 @@
 
   function isExpense(t, proj) {
     if (proj === 'Офис (ВСИП+ТТ)') {
-      // Для офисных проектов: всё кроме переводов и кредитов; Проценты к уплате включены
+      // Для офисных проектов: всё кроме переводов, кредитов и займов (они — финансовая деятельность)
       return t !== 'Перевод между счетами (поступление)'
           && t !== 'Перевод между счетами (списание)'
           && t !== 'Получение кредита'
-          && t !== 'Выплата кредита';
+          && t !== 'Выплата кредита'
+          && t !== 'Получение займа'
+          && t !== 'Выплата займа';
     }
     if (SKIP[t]) return false;
     var l = t.toLowerCase();
@@ -364,10 +368,10 @@
 
       // Финансовая деятельность — только проекты 24 и 26
       if (OXR_PIDS[tx.project_id]) {
-        if (typeName === 'Получение кредита' && incAmt > 0) {
+        if ((typeName === 'Получение кредита' || typeName === 'Получение займа') && incAmt > 0) {
           fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
         }
-        if (typeName === 'Выплата кредита' && expAmt > 0) {
+        if ((typeName === 'Выплата кредита' || typeName === 'Выплата займа') && expAmt > 0) {
           fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
         }
         // Проценты к уплате офисных проектов идут в offBrk.pct, не в fin.int
@@ -627,11 +631,9 @@
     var ctrl = tSt0 + (ti.f26 + finIn26) - (te.f26 + finOut26) - tEnd0;
     var cOk  = Math.abs(ctrl) < 1000;
 
-    // === НДС: эффективные ставки, плановые суммы, нарастающий остаток ===
-    var vatD = vat || {in_25:0, in_26:0, in_cur:0, out_25:0, out_26:0, out_cur:0};
-    // Эффективная ставка = факт НДС / факт gross; фолбэк 22/122
-    var effVatIn  = (vatD.in_26  > 0 && ti.f26 > 0) ? vatD.in_26  / ti.f26 : 22/122;
-    var effVatOut = (vatD.out_26 > 0 && te.f26 > 0) ? vatD.out_26 / te.f26 : 22/122;
+    // === НДС: ставки временно обнулены (TODO: уточнить методику расчёта) ===
+    var vatD = {in_25:0, in_26:0, in_cur:0, out_25:0, out_26:0, out_cur:0};
+    var effVatIn = 0, effVatOut = 0;
     // Плановый НДС по каждому из 6 месяцев
     var vatInPlan  = ti.plan.map(function(v) { return Math.round(v * effVatIn); });
     var vatOutPlan = te.plan.map(function(v) { return Math.round(v * effVatOut); });
