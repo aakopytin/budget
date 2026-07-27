@@ -337,7 +337,7 @@
   var _pls3144err = null;
 
   function fetchPls3144(curYear) {
-    // Даты: 01.01.prevYear — сегодня (Аспро может отклонять будущие даты)
+    // Отдельный прокси /api/pls3144 — минует entity/ALLOWED логику /api/data
     var prevYear = curYear - 1;
     var now = new Date();
     var todayStr = now.getFullYear() + '-'
@@ -346,14 +346,10 @@
     var all = [], page = 1;
     function next() {
       var p = new URLSearchParams();
-      p.append('entity',                    'transaction_pls');
-      p.append('filter[date][start_date]',  prevYear + '-01-01');
-      p.append('filter[date][end_date]',    todayStr);
-      p.append('filter[category_id]',       '3144');
-      p.append('limit',                     '100');
-      p.append('page',                      String(page));
-      var reqUrl = '/api/data?' + p.toString();
-      return fetch(reqUrl)
+      p.append('start', prevYear + '-01-01');
+      p.append('end',   todayStr);
+      p.append('page',  String(page));
+      return fetch('/api/pls3144?' + p.toString())
         .then(function(r) {
           var status = r.status;
           return r.json().then(function(d) {
