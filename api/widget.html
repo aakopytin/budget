@@ -731,8 +731,11 @@
     dal.vatIn  = dal.vatInPlan;
     dal.vatOut = dal.vatOutPlan;
 
+    var pls3144count = (plsItems||[]).filter(function(p){return p.category_id===3144;}).length;
+    var refMapKeys   = Object.keys(refCatTypeMap).length;
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
-            effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType};
+            effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
+            pls3144count: pls3144count, refMapKeys: refMapKeys};
   }
 
   function buildVatForecastTable(vf) {
@@ -862,13 +865,22 @@
         + '</tr>';
     });
     var TH = 'padding:2px 6px;font-size:10px;font-weight:600;color:#6b7280;border-bottom:1.5px solid #9ca3af;white-space:nowrap;text-align:right';
+    var totalEffExp = Object.keys(vf.effExpByType||{}).reduce(function(s,k){return s+(vf.effExpByType[k]||0);},0);
+    var totalEffVat = Object.keys(vf.effVatByType||{}).reduce(function(s,k){return s+(vf.effVatByType[k]||0);},0);
+    var diagStr = '<div style="font-size:10px;color:#6b7280;padding:2px 6px 4px">'
+      + 'PLS 3144: ' + (vf.pls3144count||0) + ' записей · '
+      + 'tx с reference_id: ' + (vf.refMapKeys||0) + ' · '
+      + 'Расходы-факт: ' + Math.round(totalEffExp/1000) + ' тыс. · '
+      + 'НДС совпало: ' + Math.round(totalEffVat/1000) + ' тыс.'
+      + '</div>';
     var rateTable = '<div style="margin-top:10px">'
       + '<div style="font-size:11px;font-weight:600;color:#6b7280;padding:3px 6px 2px;border-bottom:1px solid #d1d5db;background:#f8f9fd">Эффективные ставки НДС (расходы)</div>'
+      + diagStr
       + '<table style="border-collapse:collapse;width:auto;min-width:420px">'
       + '<tr>'
       + '<th style="' + TH + ';text-align:left">Тип расходов</th>'
       + '<th style="' + TH + '">Расходы-факт</th>'
-      + '<th style="' + TH + '">НДС-факт (PLS 3157)</th>'
+      + '<th style="' + TH + '">НДС-факт (PLS 3144)</th>'
       + '<th style="' + TH + '">Ставка</th>'
       + '<th style="' + TH + '">Источник</th>'
       + '</tr>'
