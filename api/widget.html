@@ -91,8 +91,8 @@
     20:'Прочие',
     17:'Прочие',
     21:'Прочие',
-    24:'ОХР (ВСИП+ТТ)',
-    26:'ОХР (ВСИП+ТТ)'
+    24:'Офис (ВСИП+ТТ)',
+    26:'Офис (ВСИП+ТТ)'
   };
 
   var PROJECTS = [
@@ -108,7 +108,7 @@
     'Голутвинский',
     'Центр. договор',
     'Прочие',
-    'ОХР (ВСИП+ТТ)'
+    'Офис (ВСИП+ТТ)'
   ];
 
   // Проекты ОХР для финансовой деятельности
@@ -132,9 +132,15 @@
   function isIncome(t) { return !!INC_TYPES[t]; }
 
   function isExpense(t, proj) {
+    if (proj === 'Офис (ВСИП+ТТ)') {
+      // Для офисных проектов: всё кроме переводов и кредитов; Проценты к уплате включены
+      return t !== 'Перевод между счетами (поступление)'
+          && t !== 'Перевод между счетами (списание)'
+          && t !== 'Получение кредита'
+          && t !== 'Выплата кредита';
+    }
     if (SKIP[t]) return false;
     var l = t.toLowerCase();
-    if (proj === 'ОХР (ВСИП+ТТ)') return true;
     if (proj === 'Прочие' && t === 'Возвраты клиентам') return true;
     return (
       l.indexOf('материал') === 0 ||
@@ -152,6 +158,41 @@
   }
 
   var MS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+
+  var OFF_SUBCATS = [
+    {code:'zp',  label:'Зарплата'},
+    {code:'km',  label:'Командировочные'},
+    {code:'bk',  label:'Банковские комиссии'},
+    {code:'lz',  label:'Лизинг'},
+    {code:'ar',  label:'Аренда'},
+    {code:'buh', label:'Бухгалтерия'},
+    {code:'ntax',label:'Налоги и взносы'},
+    {code:'pct', label:'Проценты к уплате'},
+    {code:'bg',  label:'Банковские гарантии'},
+    {code:'ret', label:'Возвраты клиентам'},
+    {code:'po',  label:'Прочие офисные'}
+  ];
+
+  function offSubcat(name) {
+    var l = name.toLowerCase();
+    if (l.indexOf('зарплат') >= 0 || l.indexOf('фот') >= 0 || l.indexOf('оплата труда') >= 0) return 'zp';
+    if (l.indexOf('командир') >= 0) return 'km';
+    if (l.indexOf('гарант') >= 0) return 'bg';
+    if (l.indexOf('лизинг') >= 0) return 'lz';
+    if (l.indexOf('аренд') >= 0) return 'ar';
+    if (l.indexOf('бухгалтер') >= 0 || l.indexOf('аудит') >= 0) return 'buh';
+    if (l.indexOf('налог') >= 0 || l.indexOf('взнос') >= 0 || l.indexOf('страхов') >= 0) return 'ntax';
+    if (l.indexOf('процент') >= 0) return 'pct';
+    if (l.indexOf('банков') >= 0 || l.indexOf('комисс') >= 0) return 'bk';
+    if (l.indexOf('возврат') >= 0) return 'ret';
+    return 'po';
+  }
+
+  function newOffBrk() {
+    var r = {};
+    OFF_SUBCATS.forEach(function(s) { r[s.code] = {f25:0, f26:0, fCur:0}; });
+    return r;
+  }
 
   function pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
@@ -245,10 +286,11 @@
     var fin = {
       skIn:  { f25:0, f26:0, fCur:0 },   // Получение займов
       skOut: { f25:0, f26:0, fCur:0 },   // Выдача займов
-      int:   { f25:0, f26:0, fCur:0 },   // Процентные расходы
+      int:   { f25:0, f26:0, fCur:0 },   // Процентные расходы (не-офис; офисные % — в offBrk.pct)
       trIn:  { f25:0, f26:0, fCur:0 },   // Переводы поступление
       trOut: { f25:0, f26:0, fCur:0 }    // Переводы списание
     };
+    var offBrk = newOffBrk();
 
     // Остатки по банковским счетам
     var vSt = 0, tSt = 0, vEnd = 0, tEnd = 0;
@@ -290,14 +332,19 @@
         if (typeName === 'Выплата кредита' && expAmt > 0) {
           fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
         }
-        if (typeName === 'Проценты к уплате' && expAmt > 0) {
-          fin.int[fKey]   += expAmt; if (isCur) fin.int.fCur   += expAmt;
-        }
+        // Проценты к уплате офисных проектов идут в offBrk.pct, не в fin.int
         if (typeName === 'Перевод между счетами (поступление)' && incAmt > 0) {
           fin.trIn[fKey]  += incAmt; if (isCur) fin.trIn.fCur  += incAmt;
         }
         if (typeName === 'Перевод между счетами (списание)' && expAmt > 0) {
           fin.trOut[fKey] += expAmt; if (isCur) fin.trOut.fCur += expAmt;
+        }
+        // Разбивка офисных расходов по подкатегориям
+        if (expAmt > 0 && isExpense(typeName, 'Офис (ВСИП+ТТ)')) {
+          var sub = offSubcat(typeName);
+          var brk = offBrk[sub];
+          if (isPrev) { brk.f25 += expAmt; }
+          else { brk.f26 += expAmt; if (isCur) brk.fCur += expAmt; }
         }
       }
 
@@ -313,15 +360,19 @@
       }
     });
 
-    return { acc:acc, fin:fin, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd };
+    return { acc:acc, fin:fin, offBrk:offBrk, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd };
   }
 
   // Расчёт плана
-  function calcPlan(planItems, curYear, curMonth, nextMonths) {
+  function calcPlan(planItems, curYear, curMonth, nextMonths, catMap) {
     var pm = {};
     PROJECTS.forEach(function(p) {
       pm[p] = { bi_plan:0, be_plan:0, hI:0, hE:0,
                 plan_i:[0,0,0,0,0,0], plan_e:[0,0,0,0,0,0] };
+    });
+    var offBrkPlan = {};
+    OFF_SUBCATS.forEach(function(s) {
+      offBrkPlan[s.code] = {be_plan:0, hE:0, plan_e:[0,0,0,0,0,0]};
     });
     planItems.forEach(function(item) {
       var proj = PID_MAP[item.project_id];
@@ -340,19 +391,38 @@
         if (isE) d.hE += val;
       }
       nextMonths.forEach(function(nm, idx) {
-        if (iy === nm.year && im === nm.month) {
+        // Последний столбец (idx=5) накапливает все месяцы начиная с 6-го
+        var nmYM   = nm.year * 100 + nm.month;
+        var itemYM = iy * 100 + im;
+        var match  = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
+        if (match) {
           if (isI) d.plan_i[idx] += val;
           if (isE) d.plan_e[idx] += val;
         }
       });
+      // Разбивка плана по подкатегориям для офисных проектов
+      if (OXR_PIDS[item.project_id] && isE) {
+        var catName = (catMap && catMap[item.category_id]) || '';
+        var sub = offSubcat(catName);
+        var obp = offBrkPlan[sub];
+        if (iy > curYear || (iy === curYear && im >= curMonth)) obp.be_plan += val;
+        if (iy === curYear && im === curMonth) obp.hE += val;
+        nextMonths.forEach(function(nm, idx) {
+          var nmYM   = nm.year * 100 + nm.month;
+          var itemYM = iy * 100 + im;
+          var match  = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
+          if (match) obp.plan_e[idx] += val;
+        });
+      }
     });
-    return pm;
+    return {pm: pm, offBrkPlan: offBrkPlan};
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths) {
-    var acc  = result.acc;
-    var fin  = result.fin;
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan) {
+    var acc    = result.acc;
+    var fin    = result.fin;
+    var offBrk = result.offBrk || newOffBrk();
     var vSt  = result.vSt,  tSt  = result.tSt;
     var vEnd = result.vEnd, tEnd = result.tEnd;
     var tSt0 = vSt + tSt, tEnd0 = vEnd + tEnd;
@@ -437,6 +507,54 @@
         + '</tr>';
     }
 
+    // Секция офисных расходов с разбивкой по подкатегориям
+    function offExpSection() {
+      var proj = 'Офис (ВСИП+ТТ)';
+      var d = pm[proj], a = acc[proj];
+      // Подкатегории кроме po, отсортированные по f26 убыванию
+      var subs = OFF_SUBCATS.filter(function(s) {
+        return s.code !== 'po' && (offBrk[s.code].f25 || offBrk[s.code].f26 || offBrk[s.code].fCur
+          || (offBrkPlan && offBrkPlan[s.code].be_plan));
+      });
+      subs.sort(function(a, b) { return (offBrk[b.code].f26||0) - (offBrk[a.code].f26||0); });
+      // po всегда последние
+      var poSub = OFF_SUBCATS.filter(function(s) { return s.code === 'po'; })[0];
+      if (offBrk.po.f25 || offBrk.po.f26 || offBrk.po.fCur || (offBrkPlan && offBrkPlan.po.be_plan))
+        subs.push(poSub);
+      var subRows = subs.map(function(s) {
+        var brk = offBrk[s.code];
+        var obp = offBrkPlan ? offBrkPlan[s.code] : null;
+        var tot = brk.f25 + brk.f26;
+        return '<tr>'
+          + TDl('<span style="padding-left:14px">' + s.label + '</span>')
+          + TD(dash(), ';color:#9ca3af')
+          + TD(fmtK(brk.f25), SEP) + TD(fmtK(brk.f26))
+          + TD(fmtK(tot, true))
+          + TD(dash())
+          + TD(dash(), SEP) + TD(fmtK(brk.fCur))
+          + (obp ? obp.plan_e : [0,0,0,0,0,0]).map(function(v, i) {
+              return TD(fmtK(v), i === 0 ? SEP : '');
+            }).join('')
+          + '</tr>';
+      }).join('');
+      // Итого офисные
+      var f25 = a ? a.e25 : 0, f26 = a ? a.e26 : 0, fCur = a ? a.eCur : 0;
+      var b = getBudget(proj, 'exp');
+      var plan = d ? d.plan_e : [0,0,0,0,0,0];
+      var fact = f25 + f26, ost = b - fact;
+      return sectionHdr('ОФИСНЫЕ РАСХОДЫ', '#f3f0ff', '#4c1d95', '#c4b5fd')
+        + subRows
+        + '<tr style="background:#ede9fe">'
+        + TDl('<strong>Итого офисные</strong>', BT)
+        + TD(fmtK(b, true), ';color:#9ca3af' + BT)
+        + TD(fmtK(f25, true), SEP + BT) + TD(fmtK(f26, true), BT)
+        + TD(fmtK(fact, true), BT)
+        + TD(fmtK(ost, true, true), (ost < 0 ? ';color:#dc2626' : '') + BT)
+        + TD(fmtK(d ? d.hE : 0, true), SEP + BT) + TD(fmtK(fCur, true), BT)
+        + plan.map(function(v, i) { return TD(fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
+        + '</tr>';
+    }
+
     // Строка финансовой деятельности: только факт-колонки, план пустой
     function finRow(label, item) {
       var f25 = item.f25, f26 = item.f26, tot = f25 + f26, fCur = item.fCur;
@@ -473,34 +591,23 @@
       return '<tr style="background:' + bg + '"><td colspan="14" style="padding:4px 8px;font-weight:700;font-size:11.5px;color:' + color + ';border-bottom:1px solid ' + border + '">' + text + '</td></tr>';
     };
 
-    // Строка начального остатка: метка в кол.3, значение в кол.4
-    function balOpenRow(entity, v, total) {
-      var lbl = 'Остаток на ' + jan1Str + ' · ' + entity;
-      var bg  = total ? ';background:#d1e8ff' : '';
-      return '<tr style="font-size:10.5px' + bg + '">'
-        + TD(dash())
-        + TD(dash(), ';color:#9ca3af')
-        + TDl(total ? '<strong>' + lbl + '</strong>' : lbl, SEP + ';color:#374151')
+    // Строка остатка: метка span на кол.1-3, значение в кол.4
+    function balRow(lbl, v, total, bg) {
+      return '<tr style="font-size:10.5px' + (bg ? ';background:' + bg : '') + '">'
+        + '<td colspan="3" style="padding:2px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151">'
+        + (total ? '<strong>' + lbl + '</strong>' : lbl)
+        + '</td>'
         + TD(fmtBal(v, total), '')
         + TD(dash()) + TD(dash())
         + TD(dash(), SEP) + TD(dash())
         + planEmpty()
         + '</tr>';
     }
-
-    // Строка закрывающего остатка: метка в кол.4, значение в кол.5
+    function balOpenRow(entity, v, total) {
+      return balRow('Остаток на ' + jan1Str + ' · ' + entity, v, total, total ? '#d1e8ff' : '');
+    }
     function balCloseRow(entity, v, total) {
-      var lbl = 'Остаток на ' + todayStr + ' · ' + entity;
-      var bg  = total ? ';background:#d1e8ff' : '';
-      return '<tr style="font-size:10.5px' + bg + '">'
-        + TD(dash())
-        + TD(dash(), ';color:#9ca3af')
-        + TDl(total ? '<strong>' + lbl + '</strong>' : lbl, SEP + ';color:#374151')
-        + TD(fmtBal(v, total), '')
-        + TD(dash()) + TD(dash())
-        + TD(dash(), SEP) + TD(dash())
-        + planEmpty()
-        + '</tr>';
+      return balRow('Остаток на ' + todayStr + ' · ' + entity, v, total, total ? '#d1e8ff' : '');
     }
 
     // Переводы между счетами — одна строка нетто
@@ -525,13 +632,17 @@
       + '<td colspan="6" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">&#9654; План</td>'
       + '</tr>'
       + '<tr style="background:#1e3a5f;color:#fff">'
-      + THl('Проект', ';min-width:120px;max-width:140px')
+      + THl('Проект', ';width:1%')
       + TH('Бюджет', ';color:#a8c4e0')
       + TH(String(prevYear), SEP + ';color:#a8c4e0')
       + TH(yearLabel)
       + TH('Итого') + TH('Остаток')
       + TH('Бюджет', SEP) + TH('Факт')
-      + nextMonths.map(function(nm, i) { return TH(MS[nm.month-1] + (nm.year !== curYear ? ' \'' + String(nm.year).slice(2) : ''), i === 0 ? SEP : ''); }).join('')
+      + nextMonths.map(function(nm, i) {
+          var lbl = MS[nm.month-1] + (nm.year !== curYear ? ' \'' + String(nm.year).slice(2) : '');
+          if (i === 5) lbl += '+далее';
+          return TH(lbl, i === 0 ? SEP : '');
+        }).join('')
       + '</tr>'
       + '</thead>'
       + '<tbody>'
@@ -548,7 +659,8 @@
 
       // РАСХОДЫ
       + sectionHdr('РАСХОДЫ', '#fae8e8', '#7f1d1d', '#fca5a5')
-      + PROJECTS.map(function(p) { return pRow(p, 'exp'); }).join('')
+      + PROJECTS.filter(function(p) { return p !== 'Офис (ВСИП+ТТ)'; }).map(function(p) { return pRow(p, 'exp'); }).join('')
+      + offExpSection()
       + totRow('ИТОГО РАСХОДЫ', te, '#fef2f2')
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
@@ -618,9 +730,11 @@
       var txns      = results[0];
       var planItems = results[1];
       var catMap    = results[2];
-      var factResult = calcFact(txns, catMap, yr, mo);
-      var pm         = calcPlan(planItems, yr, mo, nextMonths);
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths);
+      var factResult  = calcFact(txns, catMap, yr, mo);
+      var planResult  = calcPlan(planItems, yr, mo, nextMonths, catMap);
+      var pm          = planResult.pm;
+      var offBrkPlan  = planResult.offBrkPlan;
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
