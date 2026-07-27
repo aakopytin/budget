@@ -1,13 +1,20 @@
 {
-  "functions": {
-    "api/index.js": {
-      "includeFiles": "api/widget.html"
-    }
-  },
   "routes": [
     {
       "src": "/api/data",
       "dest": "/api/data.js"
+    },
+    {
+      "src": "/api/pls3144",
+      "dest": "/api/pls3144.js"
+    },
+    {
+      "src": "/api/dds",
+      "dest": "/api/index.js"
+    },
+    {
+      "src": "/api/index",
+      "dest": "/api/index.js"
     },
     {
       "src": "/(.*)",
