@@ -333,17 +333,48 @@
 
   // Загрузка PLS-записей (НДС) за curYear и год до.
   // Запрос 1: без фильтра → 3157/3158 (исходящий/входящий НДС per-transaction).
-  // Запрос 2: filter 3144 с датой → фактические суммы НДС-вычета (для eff rates).
+  // Запрос 2: filter 3144 — точно по образцу nds.html (fetchAllPls).
   var _pls3144err = null;
+
+  function fetchPls3144(curYear) {
+    // Даты: 01.01.prevYear — сегодня (Аспро может отклонять будущие даты)
+    var prevYear = curYear - 1;
+    var now = new Date();
+    var todayStr = now.getFullYear() + '-'
+      + String(now.getMonth() + 1).padStart(2, '0') + '-'
+      + String(now.getDate()).padStart(2, '0');
+    var all = [], page = 1;
+    function next() {
+      var p = new URLSearchParams();
+      p.append('entity',                    'transaction_pls');
+      p.append('filter[date][start_date]',  prevYear + '-01-01');
+      p.append('filter[date][end_date]',    todayStr);
+      p.append('filter[category_id]',       '3144');
+      p.append('limit',                     '100');
+      p.append('page',                      String(page));
+      return fetch('/api/data?' + p.toString())
+        .then(function(r) {
+          if (!r.ok) throw new Error('3144 HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(d) {
+          if (d.error) throw new Error('3144: ' + JSON.stringify(d.error).slice(0, 60));
+          var items = (d.response && d.response.items) || [];
+          all = all.concat(items);
+          var total = (d.response && d.response.total) || 0;
+          if (all.length >= total || items.length < 100) return all;
+          page++;
+          return next();
+        });
+    }
+    return next();
+  }
+
   function fetchPls(curYear) {
     _pls3144err = null;
     var prevYear = curYear - 1;
     var req1 = fetchAll('transaction_pls');
-    var req2 = fetchAll('transaction_pls', {
-      'filter[category_id]': '3144',
-      'filter[date][start_date]': prevYear + '-01-01',
-      'filter[date][end_date]':   curYear  + '-12-31'
-    }).catch(function(e) {
+    var req2 = fetchPls3144(curYear).catch(function(e) {
       _pls3144err = (e && e.message) ? e.message.slice(0, 80) : 'ошибка req2';
       console.warn('[fetchPls] req2 failed:', _pls3144err);
       return [];
