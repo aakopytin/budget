@@ -332,18 +332,28 @@
   }
 
   // Загрузка PLS-записей (НДС) за curYear и год до.
-  // Аспро возвращает разные категории только при явном filter[category_id].
   // Запрос 1: без фильтра → 3157/3158 (исходящий/входящий НДС per-transaction).
-  // Запрос 2: filter 3144,3147 → фактические НДС-суммы платежей/поступлений (для eff rates).
+  // Запрос 2: filter 3144 с датой → фактические суммы НДС-вычета (для eff rates).
+  var _pls3144err = null;
   function fetchPls(curYear) {
+    _pls3144err = null;
+    var prevYear = curYear - 1;
     var req1 = fetchAll('transaction_pls');
-    var req2 = fetchAll('transaction_pls', {'filter[category_id]': '3144,3147'});
+    var req2 = fetchAll('transaction_pls', {
+      'filter[category_id]': '3144',
+      'filter[date][start_date]': prevYear + '-01-01',
+      'filter[date][end_date]':   curYear  + '-12-31'
+    }).catch(function(e) {
+      _pls3144err = (e && e.message) ? e.message.slice(0, 80) : 'ошибка req2';
+      console.warn('[fetchPls] req2 failed:', _pls3144err);
+      return [];
+    });
     return Promise.all([req1, req2]).then(function(res) {
-      var all = res[0].concat(res[1]);
-      return all.filter(function(i) {
+      var combined = res[0].concat(res[1]);
+      return combined.filter(function(i) {
         if (!i.date) return false;
         var iy = parseInt(i.date.substring(0, 4));
-        return (iy === curYear || iy === curYear - 1)
+        return (iy === curYear || iy === prevYear)
             && (i.category_id === 3158 || i.category_id === 3157
              || i.category_id === 3144 || i.category_id === 3147);
       });
@@ -880,6 +890,7 @@
       + 'tx с reference_id: ' + (vf.refMapKeys||0) + ' · '
       + 'Расходы-факт: ' + Math.round(totalEffExp/1000) + ' тыс. · '
       + 'НДС совпало: ' + Math.round(totalEffVat/1000) + ' тыс.'
+      + (_pls3144err ? ' <span style="color:#dc2626">⚠ req2: ' + _pls3144err + '</span>' : '')
       + '</div>';
     var rateTable = '<div style="margin-top:10px">'
       + '<div style="font-size:11px;font-weight:600;color:#6b7280;padding:3px 6px 2px;border-bottom:1px solid #d1d5db;background:#f8f9fd">Эффективные ставки НДС (расходы)</div>'
