@@ -660,7 +660,14 @@
       }
     });
 
+    // ── DEBUG ──────────────────────────────────────────────────────────────
+    console.log('[НДС-прогноз] effRates:', JSON.stringify(effRates));
+    console.log('[НДС-прогноз] effExpByType:', JSON.stringify(effExpByType));
+    console.log('[НДС-прогноз] effVatByType:', JSON.stringify(effVatByType));
+    console.log('[НДС-прогноз] plsItems 3157 count:', (plsItems||[]).filter(function(p){return p.category_id===3157;}).length);
     // ── Шаг 5: план — plan_money (org_account_id=36), эффективные ставки ─
+    var augYM = curYear * 100 + (curMonth === 12 ? 1 : curMonth + 1);
+    var augDebug = [];
     (planItems || []).forEach(function(item) {
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
@@ -671,6 +678,10 @@
       var catName = catMap[item.category_id] || '';
       if (catName === 'Перевод между счетами (поступление)' ||
           catName === 'Перевод между счетами (списание)') return;
+      if (pYM === augYM && isE) {
+        var t2 = getExpCatType(catName);
+        augDebug.push({cat: catName, type: t2, val: val, rate: effRates[t2] || 0, vat: Math.round(val*(effRates[t2]||0))});
+      }
       var tgt = null;
       if (pYM >= dalYM) {
         tgt = dal;
@@ -692,6 +703,7 @@
         tgt.vatOutPlan += Math.round(val * rOut);
       }
     });
+    console.log('[НДС-прогноз] Август — план расходов:', augDebug);
 
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
@@ -718,7 +730,7 @@
     dal.vatOut = dal.vatOutPlan;
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
-            effRates: effRates};
+            effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType};
   }
 
   function buildVatForecastTable(vf) {
@@ -824,6 +836,43 @@
       return row;
     }
 
+    // Таблица эффективных ставок
+    var TYPES_LABELS = {smr:'СМР', mat:'Материалы', design:'Проектирование/Изыскание', ar:'Аренда', lz:'Лизинг', buh:'Бухгалтерия', proj_other:'Прочие проектные', bg:'Банк. гарантии', zero:'Без НДС'};
+    var DEFAULT_EFF_RATES_REF = {smr:22/122, mat:22/122, design:22/122, bg:0, ar:22/122, lz:22/122, buh:22/122, proj_other:22/122, zero:0};
+    var rateRows = '';
+    var TS = 'padding:2px 6px;font-size:10px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151';
+    var TSr = TS + ';text-align:right';
+    ['smr','mat','design','ar','lz','buh','proj_other','bg','zero'].forEach(function(t) {
+      var exp = vf.effExpByType[t] || 0;
+      var vat = vf.effVatByType[t] || 0;
+      var rate = vf.effRates[t] || 0;
+      var fromFact = exp > 0 && vat > 0;
+      var srcLabel = fromFact ? '<span style="color:#15803d;font-weight:600">факт PLS</span>' : '<span style="color:#9ca3af">дефолт</span>';
+      var rateStr = rate > 0 ? (rate * 100).toFixed(2) + '%' : '0%';
+      var expStr  = exp  > 0 ? new Intl.NumberFormat('ru-RU').format(Math.round(exp / 1000)) + ' тыс.' : '—';
+      var vatStr  = vat  > 0 ? new Intl.NumberFormat('ru-RU').format(Math.round(vat / 1000)) + ' тыс.' : '—';
+      rateRows += '<tr>'
+        + '<td style="' + TS  + '">' + TYPES_LABELS[t] + '</td>'
+        + '<td style="' + TSr + '">' + expStr + '</td>'
+        + '<td style="' + TSr + '">' + vatStr + '</td>'
+        + '<td style="' + TSr + ';font-weight:600;color:#1d4ed8">' + rateStr + '</td>'
+        + '<td style="' + TSr + '">' + srcLabel + '</td>'
+        + '</tr>';
+    });
+    var TH = 'padding:2px 6px;font-size:10px;font-weight:600;color:#6b7280;border-bottom:1.5px solid #9ca3af;white-space:nowrap;text-align:right';
+    var rateTable = '<div style="margin-top:10px">'
+      + '<div style="font-size:11px;font-weight:600;color:#6b7280;padding:3px 6px 2px;border-bottom:1px solid #d1d5db;background:#f8f9fd">Эффективные ставки НДС (расходы)</div>'
+      + '<table style="border-collapse:collapse;width:auto;min-width:420px">'
+      + '<tr>'
+      + '<th style="' + TH + ';text-align:left">Тип расходов</th>'
+      + '<th style="' + TH + '">Расходы-факт</th>'
+      + '<th style="' + TH + '">НДС-факт (PLS 3157)</th>'
+      + '<th style="' + TH + '">Ставка</th>'
+      + '<th style="' + TH + '">Источник</th>'
+      + '</tr>'
+      + rateRows
+      + '</table></div>';
+
     return '<div style="margin-top:16px">'
       + '<div style="font-size:13px;font-weight:700;color:#374151;padding:3px 5px 2px;border-bottom:2px solid #9ca3af;background:#f8f9fd">'
       + 'НДС ПРОГНОЗ (тыс. руб.)</div>'
@@ -834,7 +883,9 @@
       + dataRow('Выплаты',            function(c) { return c.exp; })
       + dataRow('НДС с выплат',       function(c) { return c.vatOut; }, '#92400e')
       + resRow('Плановый результат (без НДС)')
-      + '</table></div>';
+      + '</table>'
+      + rateTable
+      + '</div>';
   }
 
   // Построение таблицы
