@@ -369,7 +369,8 @@
   function fetchPls(curYear) {
     _pls3144err = null;
     var prevYear = curYear - 1;
-    var req1 = fetchAll('transaction_pls');
+    // req1 может вернуть 400 "entity not allowed" — подавляем ошибку
+    var req1 = fetchAll('transaction_pls').catch(function() { return []; });
     var req2 = fetchPls3144(curYear).catch(function(e) {
       _pls3144err = (e && e.message) ? e.message.slice(0, 80) : 'ошибка req2';
       console.warn('[fetchPls] req2 failed:', _pls3144err);
