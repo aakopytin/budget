@@ -139,6 +139,50 @@
     'Проценты к получению': 1
   };
 
+  // Категории расходов с нулевой ставкой НДС (для планового расчёта)
+  var ZERO_RATE_CATS = {
+    'Зарплата': 1, 'Налоги с зарплаты': 1, 'Командировки': 1,
+    'Страхование': 1, 'Расходы на услуги банков': 1, 'Банковские услуги': 1,
+    'Налоги и взносы': 1, 'Налоги - НДС': 1, 'Налог - НДС': 1,
+    'Проценты к уплате': 1, 'Банковские гарантии': 1
+  };
+
+  function getPlanExpVatRate(catName) {
+    if (!catName) return 22 / 122;
+    if (LOAN_CATS[catName] || SKIP[catName]) return 0;
+    if (ZERO_RATE_CATS[catName]) return 0;
+    return 22 / 122;
+  }
+
+  // Классифицирует название категории в тип для расчёта эффективной ставки НДС.
+  // Возвращает null — категория исключается из расчёта (переводы, займы).
+  // Возвращает 'zero' — НДС всегда 0%.
+  // Возвращает строку типа — для подстановки эффективной ставки из фактических PLS.
+  function getExpCatType(catName) {
+    if (!catName) return 'proj_other';
+    if (LOAN_CATS[catName]) return null;
+    if (catName === 'Перевод между счетами (поступление)' ||
+        catName === 'Перевод между счетами (списание)') return null;
+    if (ZERO_RATE_CATS[catName]) return 'zero';
+    var l = catName.toLowerCase();
+    if (/^смр/.test(l))      return 'smr';
+    if (/^материал/.test(l)) return 'mat';
+    if (l === 'проектирование-изыскание' || l.indexOf('изыскан') >= 0 ||
+        l === 'составление исполнительной документации' ||
+        l === 'услуги по сертификации' || l === 'тесты и испытания') return 'design';
+    if (l.indexOf('банковские гарантии') >= 0) return 'bg';
+    if (l.indexOf('аренд') >= 0) return 'ar';
+    if (l.indexOf('лизинг') >= 0) return 'lz';
+    if (l.indexOf('бухгалтер') >= 0) return 'buh';
+    return 'proj_other';
+  }
+
+  // Ставки по умолчанию — применяются если нет фактических PLS-данных для данного типа
+  var DEFAULT_EFF_RATES = {
+    smr: 22/122, mat: 22/122, design: 22/122, bg: 0,
+    ar: 22/122, lz: 22/122, buh: 22/122, proj_other: 22/122, zero: 0
+  };
+
   function isIncome(t) { return !!INC_TYPES[t]; }
 
   function isExpense(t, proj) {
@@ -493,6 +537,300 @@
       }
     });
     return {pm: pm, offBrkPlan: offBrkPlan, finPlan: finPlan};
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // НДС ПРОГНОЗ — расчёт и отображение
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  function calcVatForecast(txns, planItems, plsItems, catMap, curYear, curMonth) {
+    // Текущий квартал: первый месяц квартала
+    var q0m = curMonth <= 3 ? 1 : curMonth <= 6 ? 4 : curMonth <= 9 ? 7 : 10;
+    var curYM = curYear * 100 + curMonth;
+
+    // 9 колонок: Q0 + Q+1 + Q+2
+    var cols = [];
+    for (var qi = 0; qi < 9; qi++) {
+      var cm = q0m + qi, cy = curYear;
+      while (cm > 12) { cm -= 12; cy++; }
+      cols.push({y: cy, m: cm, ym: cy * 100 + cm});
+    }
+    // Далее: всё после 9-го месяца
+    var dalM = cols[8].m + 1, dalY = cols[8].y;
+    if (dalM > 12) { dalM = 1; dalY++; }
+    var dalYM = dalY * 100 + dalM;
+
+    // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
+    // Строим карту reference_id → catType по всем транзакциям расходов
+    var refCatTypeMap = {};
+    txns.forEach(function(tx) {
+      if (!tx.reference_id) return;
+      var aid = tx.org_account_id;
+      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      var catName = catMap[tx.category_id] || '';
+      var t = getExpCatType(catName);
+      if (t && t !== 'zero') refCatTypeMap[tx.reference_id] = t;
+    });
+
+    // Суммируем фактические расходы и НДС по типам
+    var effExpByType = {}, effVatByType = {};
+    txns.forEach(function(tx) {
+      var aid = tx.org_account_id;
+      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      var catName = catMap[tx.category_id] || '';
+      var expAmt = parseFloat(tx.outcome) || 0;
+      if (!expAmt) return;
+      var t = getExpCatType(catName);
+      if (!t || t === 'zero' || t === null) return;
+      effExpByType[t] = (effExpByType[t] || 0) + expAmt;
+    });
+    (plsItems || []).forEach(function(p) {
+      if (p.category_id !== 3157) return;
+      var vatAmt = parseFloat(p.outcome) || 0;
+      if (!vatAmt) return;
+      var t = refCatTypeMap[p.reference_id];
+      if (!t) return;
+      effVatByType[t] = (effVatByType[t] || 0) + vatAmt;
+    });
+
+    // Эффективная ставка = НДС / Расходы; дефолт из DEFAULT_EFF_RATES если нет данных
+    var effRates = {};
+    ['smr', 'mat', 'design', 'bg', 'ar', 'lz', 'buh', 'proj_other'].forEach(function(t) {
+      var denom = effExpByType[t] || 0;
+      effRates[t] = denom > 0 ? (effVatByType[t] || 0) / denom : DEFAULT_EFF_RATES[t];
+    });
+    effRates['zero'] = 0;
+
+    // ── Шаг 2: инициализируем слоты данных ───────────────────────────────
+    function makeSlot() {
+      return {
+        inc: 0, exp: 0, vatIn: 0, vatOut: 0,
+        incFact: 0, expFact: 0, vatInFact: 0, vatOutFact: 0,
+        incPlan: 0, expPlan: 0, vatInPlan: 0, vatOutPlan: 0
+      };
+    }
+    var data = cols.map(function(c) {
+      var s = makeSlot();
+      s.y = c.y; s.m = c.m; s.ym = c.ym;
+      s.isPast    = c.ym < curYM;
+      s.isCurrent = c.ym === curYM;
+      return s;
+    });
+    var dal = makeSlot();
+
+    // ── Шаг 3: факт — транзакции ──────────────────────────────────────────
+    txns.forEach(function(tx) {
+      var dt = tx.date || '';
+      if (dt.length < 7) return;
+      var tYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var aid = tx.org_account_id;
+      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      var catName  = catMap[tx.category_id] || '';
+      var projName = PID_MAP[tx.project_id] || '';
+      if (catName === 'Перевод между счетами (поступление)' ||
+          catName === 'Перевод между счетами (списание)') return;
+      var incAmt = parseFloat(tx.income)  || 0;
+      var expAmt = parseFloat(tx.outcome) || 0;
+      var isInc = isIncome(catName) || (LOAN_CATS[catName] && incAmt > 0);
+      var isExp = isExpense(catName, projName) || (LOAN_CATS[catName] && expAmt > 0);
+      for (var ci = 0; ci < 9; ci++) {
+        if (cols[ci].ym === tYM && (data[ci].isPast || data[ci].isCurrent)) {
+          if (incAmt > 0 && isInc) data[ci].incFact += incAmt;
+          if (expAmt > 0 && isExp) data[ci].expFact += expAmt;
+          break;
+        }
+      }
+    });
+
+    // ── Шаг 4: факт — PLS (3158 = НДС исходящий/доходы, 3157 = НДС входящий/расходы)
+    (plsItems || []).forEach(function(p) {
+      var dt = p.date || '';
+      if (dt.length < 7) return;
+      var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      for (var ci = 0; ci < 9; ci++) {
+        if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
+          if (p.category_id === 3158) data[ci].vatInFact  += parseFloat(p.income)  || 0;
+          if (p.category_id === 3157) data[ci].vatOutFact += parseFloat(p.outcome) || 0;
+          break;
+        }
+      }
+    });
+
+    // ── Шаг 5: план — plan_money (org_account_id=36), эффективные ставки ─
+    (planItems || []).forEach(function(item) {
+      var dt = item.plan_paid_date || '';
+      if (dt.length < 7) return;
+      var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var val     = item.total || 0;
+      var isI     = item.type === 30;
+      var isE     = item.type === 40;
+      var catName = catMap[item.category_id] || '';
+      if (catName === 'Перевод между счетами (поступление)' ||
+          catName === 'Перевод между счетами (списание)') return;
+      var tgt = null;
+      if (pYM >= dalYM) {
+        tgt = dal;
+      } else {
+        for (var ci = 0; ci < 9; ci++) {
+          if (cols[ci].ym === pYM) { tgt = data[ci]; break; }
+        }
+      }
+      if (!tgt) return;
+      if (isI) {
+        var rIn = LOAN_CATS[catName] ? 0 : 22 / 122;
+        tgt.incPlan   += val;
+        tgt.vatInPlan += Math.round(val * rIn);
+      }
+      if (isE) {
+        var t = getExpCatType(catName);
+        var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
+        tgt.expPlan    += val;
+        tgt.vatOutPlan += Math.round(val * rOut);
+      }
+    });
+
+    // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
+    data.forEach(function(col) {
+      if (col.isPast) {
+        col.inc    = col.incFact;
+        col.exp    = col.expFact;
+        col.vatIn  = col.vatInFact;
+        col.vatOut = col.vatOutFact;
+      } else if (col.isCurrent) {
+        col.inc    = col.incPlan    > 0 ? Math.max(col.incFact,    col.incPlan)    : col.incFact;
+        col.exp    = col.expPlan    > 0 ? Math.max(col.expFact,    col.expPlan)    : col.expFact;
+        col.vatIn  = col.vatInPlan  > 0 ? Math.max(col.vatInFact,  col.vatInPlan)  : col.vatInFact;
+        col.vatOut = col.vatOutPlan > 0 ? Math.max(col.vatOutFact, col.vatOutPlan) : col.vatOutFact;
+      } else {
+        col.inc    = col.incPlan;
+        col.exp    = col.expPlan;
+        col.vatIn  = col.vatInPlan;
+        col.vatOut = col.vatOutPlan;
+      }
+    });
+    dal.inc    = dal.incPlan;
+    dal.exp    = dal.expPlan;
+    dal.vatIn  = dal.vatInPlan;
+    dal.vatOut = dal.vatOutPlan;
+
+    return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
+            effRates: effRates};
+  }
+
+  function buildVatForecastTable(vf) {
+    if (!vf) return '';
+    var data = vf.data, dal = vf.dal, cols = vf.cols;
+
+    // ИТОГО ПЛАН = сумма всех 10 колонок минус факт прошлых месяцев текущего квартала
+    function colSum(fn) {
+      var s = 0;
+      data.forEach(function(c) { s += fn(c); });
+      s += fn(dal);
+      for (var ci = 0; ci < 3; ci++) {
+        if (data[ci].isPast) s -= fn(data[ci]);
+      }
+      return s;
+    }
+    var itogoInc    = colSum(function(c) { return c.inc; });
+    var itogoVatIn  = colSum(function(c) { return c.vatIn; });
+    var itogoExp    = colSum(function(c) { return c.exp; });
+    var itogoVatOut = colSum(function(c) { return c.vatOut; });
+    var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
+
+    var MO = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    function mlbl(c) { return MO[c.m - 1] + '\'' + String(c.y).slice(2); }
+    var dalM2 = vf.dalYM % 100, dalY2 = Math.floor(vf.dalYM / 100);
+    var dalLabel = MO[dalM2 - 1] + '\'' + String(dalY2).slice(2) + '+';
+
+    var HS  = 'padding:3px 5px;text-align:right;font-size:10px;font-weight:600;color:#374151;border-bottom:2px solid #9ca3af;white-space:nowrap';
+    var HSl = 'padding:3px 5px;font-size:10px;font-weight:600;color:#374151;border-bottom:2px solid #9ca3af';
+    var BL  = 'border-left:2px solid #3d5c7a';
+
+    function fv(v) {
+      var n = Math.round((v || 0) / 1000);
+      if (!n) return '<span style="color:#ccc">—</span>';
+      return new Intl.NumberFormat('ru-RU').format(n);
+    }
+    function colBg(c) {
+      if (!c) return '';
+      if (c.isPast)    return 'background:#f3f4f6';
+      if (c.isCurrent) return 'background:#eff6ff';
+      return '';
+    }
+
+    // Строка 1 заголовка: кварталы
+    var h1 = '<tr>'
+      + '<th style="' + HSl + '"></th>'
+      + '<th colspan="3" style="' + HS + ';' + BL + ';text-align:center">Текущий квартал</th>'
+      + '<th colspan="3" style="' + HS + ';' + BL + ';text-align:center">Квартал +1</th>'
+      + '<th colspan="3" style="' + HS + ';' + BL + ';text-align:center">Квартал +2</th>'
+      + '<th style="' + HS + ';' + BL + ';text-align:center">Далее</th>'
+      + '<th style="' + HS + ';' + BL + ';text-align:center;color:#1d4ed8">ИТОГО ПЛАН</th>'
+      + '</tr>';
+
+    // Строка 2 заголовка: месяцы
+    var h2 = '<tr><th style="' + HSl + '">тыс. руб.</th>';
+    cols.forEach(function(c, ci) {
+      var bg = data[ci].isPast ? 'background:#e5e7eb' : data[ci].isCurrent ? 'background:#dbeafe' : 'background:#f8f9fd';
+      var bl = (ci % 3 === 0) ? ';' + BL : '';
+      h2 += '<th style="' + HS + ';' + bg + bl + '">' + mlbl(c) + '</th>';
+    });
+    h2 += '<th style="' + HS + ';' + BL + '">' + dalLabel + '</th>';
+    h2 += '<th style="' + HS + ';' + BL + ';color:#1d4ed8">ИТОГО</th>';
+    h2 += '</tr>';
+
+    function dataRow(label, fn, vatColor) {
+      var row = '<tr>';
+      var ls = 'padding:2px 5px;font-size:11px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151';
+      row += '<td style="' + ls + '">' + label + '</td>';
+      data.forEach(function(c, ci) {
+        var bg = colBg(c);
+        var bl = (ci % 3 === 0) ? ';' + BL : '';
+        var st = 'padding:2px 5px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #f0f0f0' + (bg ? ';' + bg : '') + bl;
+        if (vatColor) st += ';color:' + vatColor;
+        row += '<td style="' + st + '">' + fv(fn(c)) + '</td>';
+      });
+      var dalV = fn(dal);
+      var dSt = 'padding:2px 5px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : '');
+      row += '<td style="' + dSt + '">' + fv(dalV) + '</td>';
+      var iV = colSum(fn);
+      var iSt = 'padding:2px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : ';color:#1d4ed8');
+      row += '<td style="' + iSt + '">' + fv(iV) + '</td>';
+      row += '</tr>';
+      return row;
+    }
+
+    function resRow(label) {
+      var brdT = 'border-top:2px solid #9ca3af';
+      var row = '<tr style="background:#f0fdf4">';
+      row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:nowrap"><strong style="color:#15803d">' + label + '</strong></td>';
+      data.forEach(function(c, ci) {
+        var bg = colBg(c);
+        var bl = (ci % 3 === 0) ? ';' + BL : '';
+        var v = (c.inc - c.vatIn) - (c.exp - c.vatOut);
+        var clr = v > 0 ? '#15803d' : v < 0 ? '#dc2626' : '#6b7280';
+        row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + (bg ? ';' + bg : '') + bl + ';color:' + clr + '">' + fv(v) + '</td>';
+      });
+      var dalV = (dal.inc - dal.vatIn) - (dal.exp - dal.vatOut);
+      var dalClr = dalV > 0 ? '#15803d' : dalV < 0 ? '#dc2626' : '#6b7280';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + ';' + BL + ';color:' + dalClr + '">' + fv(dalV) + '</td>';
+      var iClr = itogoRes > 0 ? '#15803d' : itogoRes < 0 ? '#dc2626' : '#6b7280';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + ';' + BL + ';color:' + iClr + '">' + fv(itogoRes) + '</td>';
+      row += '</tr>';
+      return row;
+    }
+
+    return '<div style="margin-top:16px">'
+      + '<div style="font-size:13px;font-weight:700;color:#374151;padding:3px 5px 2px;border-bottom:2px solid #9ca3af;background:#f8f9fd">'
+      + 'НДС ПРОГНОЗ (тыс. руб.)</div>'
+      + '<table style="border-collapse:collapse;width:100%">'
+      + h1 + h2
+      + dataRow('Поступления',        function(c) { return c.inc; })
+      + dataRow('НДС с поступлений',  function(c) { return c.vatIn; },  '#92400e')
+      + dataRow('Выплаты',            function(c) { return c.exp; })
+      + dataRow('НДС с выплат',       function(c) { return c.vatOut; }, '#92400e')
+      + resRow('Плановый результат (без НДС)')
+      + '</table></div>';
   }
 
   // Построение таблицы
@@ -922,7 +1260,9 @@
       var pm          = planResult.pm;
       var offBrkPlan  = planResult.offBrkPlan;
       var finPlan     = planResult.finPlan;
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan);
+      var vf = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo);
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan)
+        + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
