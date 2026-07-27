@@ -352,19 +352,23 @@
       p.append('filter[category_id]',       '3144');
       p.append('limit',                     '100');
       p.append('page',                      String(page));
-      return fetch('/api/data?' + p.toString())
+      var reqUrl = '/api/data?' + p.toString();
+      return fetch(reqUrl)
         .then(function(r) {
-          if (!r.ok) throw new Error('3144 HTTP ' + r.status);
-          return r.json();
-        })
-        .then(function(d) {
-          if (d.error) throw new Error('3144: ' + JSON.stringify(d.error).slice(0, 60));
-          var items = (d.response && d.response.items) || [];
-          all = all.concat(items);
-          var total = (d.response && d.response.total) || 0;
-          if (all.length >= total || items.length < 100) return all;
-          page++;
-          return next();
+          var status = r.status;
+          return r.json().then(function(d) {
+            if (status >= 400) {
+              var why = d && d.error ? JSON.stringify(d.error).slice(0, 60) : ('HTTP ' + status);
+              throw new Error('3144: ' + why);
+            }
+            if (d.error) throw new Error('3144: ' + JSON.stringify(d.error).slice(0, 60));
+            var items = (d.response && d.response.items) || [];
+            all = all.concat(items);
+            var total = (d.response && d.response.total) || 0;
+            if (all.length >= total || items.length < 100) return all;
+            page++;
+            return next();
+          });
         });
     }
     return next();
