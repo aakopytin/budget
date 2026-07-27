@@ -34,14 +34,13 @@ module.exports = async function handler(req, res) {
   const domain = process.env.ASPRO_DOMAIN || '2cec.aspro.cloud';
   const q = req.query || {};
 
-  // Build Aspro URL directly — no entity/ALLOWED indirection
-  // NOTE: date + category_id filters together return 0 in Aspro API.
-  // Use only category filter; client-side date filtering is done in widget.html.
+  // Build Aspro URL directly.
+  // NOTE: filter[category_id] does NOT work for transaction_pls in Aspro REST API.
+  // Fetch all records; category filtering is done client-side in widget.html.
   const params = new URLSearchParams();
   params.append('api_key', apiKey);
   params.append('limit', '100');
   params.append('page', q.page || '1');
-  params.append('filter[category_id]', '3144');
 
   const url = 'https://' + domain + '/api/v1/module/fin/transaction_pls/list?' + params.toString();
 
