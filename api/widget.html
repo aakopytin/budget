@@ -345,11 +345,7 @@
       + String(now.getDate()).padStart(2, '0');
     var all = [], page = 1;
     function next() {
-      var p = new URLSearchParams();
-      p.append('start', prevYear + '-01-01');
-      p.append('end',   todayStr);
-      p.append('page',  String(page));
-      return fetch('/api/pls3144?' + p.toString())
+      return fetch('/api/pls3144?page=' + page)
         .then(function(r) {
           var status = r.status;
           return r.json().then(function(d) {
