@@ -181,7 +181,10 @@
     if (l.indexOf('лизинг') >= 0) return 'lz';
     if (l.indexOf('аренд') >= 0) return 'ar';
     if (l.indexOf('бухгалтер') >= 0 || l.indexOf('аудит') >= 0) return 'buh';
-    if (l.indexOf('налог') >= 0 || l.indexOf('взнос') >= 0 || l.indexOf('страхов') >= 0) return 'ntax';
+    if (l.indexOf('налог') >= 0 || l.indexOf('взнос') >= 0 || l.indexOf('страхов') >= 0
+        || l.indexOf('усн') >= 0 || l.indexOf('ндс') >= 0 || l.indexOf('ифнс') >= 0
+        || l.indexOf('пенсионн') >= 0 || l.indexOf('пфр') >= 0 || l.indexOf('фсс') >= 0
+        || l.indexOf('ффомс') >= 0) return 'ntax';
     if (l.indexOf('процент') >= 0) return 'pct';
     if (l.indexOf('банков') >= 0 || l.indexOf('комисс') >= 0) return 'bk';
     if (l.indexOf('возврат') >= 0) return 'ret';
@@ -525,13 +528,17 @@
         var brk = offBrk[s.code];
         var obp = offBrkPlan ? offBrkPlan[s.code] : null;
         var tot = brk.f25 + brk.f26;
+        // Бюджет = факт_25 + (факт_26 - тек.мес) + план_от_тек.мес
+        var b   = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
+        var ost = b - tot;
+        var hE  = obp ? obp.hE : 0;
         return '<tr>'
           + TDl('<span style="padding-left:14px">' + s.label + '</span>')
-          + TD(dash(), ';color:#9ca3af')
+          + TD(fmtK(b), ';color:#9ca3af')
           + TD(fmtK(brk.f25), SEP) + TD(fmtK(brk.f26))
           + TD(fmtK(tot, true))
-          + TD(dash())
-          + TD(dash(), SEP) + TD(fmtK(brk.fCur))
+          + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
+          + TD(fmtK(hE), SEP) + TD(fmtK(brk.fCur))
           + (obp ? obp.plan_e : [0,0,0,0,0,0]).map(function(v, i) {
               return TD(fmtK(v), i === 0 ? SEP : '');
             }).join('')
