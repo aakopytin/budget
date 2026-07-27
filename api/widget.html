@@ -274,6 +274,41 @@
     });
   }
 
+  // Загрузка PLS-записей (НДС) за curYear и год до
+  function fetchPls(curYear) {
+    return fetchAll('transaction_pls').then(function(items) {
+      return items.filter(function(i) {
+        if (!i.date) return false;
+        var iy = parseInt(i.date.substring(0, 4));
+        return (iy === curYear || iy === curYear - 1)
+            && (i.category_id === 3158 || i.category_id === 3157);
+      });
+    });
+  }
+
+  // Расчёт фактического НДС из PLS-записей
+  // category 3158 (OUTPUT_VAT): income → НДС с поступлений
+  // category 3157 (INPUT_VAT): outcome → НДС с выплат
+  function calcVat(plsItems, curYear, curMonth) {
+    var v = {in_25:0, in_26:0, in_cur:0, out_25:0, out_26:0, out_cur:0};
+    plsItems.forEach(function(p) {
+      var yr   = parseInt(p.date.slice(0, 4));
+      var mo   = parseInt(p.date.slice(5, 7));
+      var prev = (yr === curYear - 1);
+      var cur  = (yr === curYear && mo === curMonth);
+      if (p.category_id === 3158) {
+        var a = parseFloat(p.income) || 0;
+        if (prev) v.in_25 += a;
+        else if (yr === curYear) { v.in_26 += a; if (cur) v.in_cur += a; }
+      } else if (p.category_id === 3157) {
+        var b = parseFloat(p.outcome) || 0;
+        if (prev) v.out_25 += b;
+        else if (yr === curYear) { v.out_26 += b; if (cur) v.out_cur += b; }
+      }
+    });
+    return v;
+  }
+
   // Расчёт факта + остатки + финансовая деятельность
   function calcFact(txns, catMap, curYear, curMonth) {
     var now   = new Date();
@@ -422,7 +457,7 @@
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
@@ -592,6 +627,30 @@
     var ctrl = tSt0 + (ti.f26 + finIn26) - (te.f26 + finOut26) - tEnd0;
     var cOk  = Math.abs(ctrl) < 1000;
 
+    // === НДС: эффективные ставки, плановые суммы, нарастающий остаток ===
+    var vatD = vat || {in_25:0, in_26:0, in_cur:0, out_25:0, out_26:0, out_cur:0};
+    // Эффективная ставка = факт НДС / факт gross; фолбэк 22/122
+    var effVatIn  = (vatD.in_26  > 0 && ti.f26 > 0) ? vatD.in_26  / ti.f26 : 22/122;
+    var effVatOut = (vatD.out_26 > 0 && te.f26 > 0) ? vatD.out_26 / te.f26 : 22/122;
+    // Плановый НДС по каждому из 6 месяцев
+    var vatInPlan  = ti.plan.map(function(v) { return Math.round(v * effVatIn); });
+    var vatOutPlan = te.plan.map(function(v) { return Math.round(v * effVatOut); });
+    var vatInCurPlan  = Math.round(ti.fH * effVatIn);
+    var vatOutCurPlan = Math.round(te.fH * effVatOut);
+    var vatInTot  = vatD.in_25  + vatD.in_26;
+    var vatOutTot = vatD.out_25 + vatD.out_26;
+    // Плановый остаток нарастающим итогом (нетто, без НДС)
+    var planBal_cur = Math.round(tEnd0
+      + (ti.fH - ti.fCur) * (1 - effVatIn)
+      - (te.fH - te.fCur) * (1 - effVatOut));
+    var planBal = [0, 0, 0, 0, 0, 0];
+    for (var bi = 0; bi < 6; bi++) {
+      var bPrev = bi === 0 ? planBal_cur : planBal[bi - 1];
+      planBal[bi] = Math.round(bPrev
+        + ti.plan[bi] * (1 - effVatIn)
+        - te.plan[bi] * (1 - effVatOut));
+    }
+
     var yearLabel = curYear + '<br><span style="font-weight:400;font-size:9px">янв–' + curMon.toLowerCase() + '</span>';
 
     var sectionHdr = function(text, bg, color, border) {
@@ -664,11 +723,55 @@
       + PROJECTS.map(function(p) { return pRow(p, 'inc'); }).join('')
       + totRow('ИТОГО ДОХОДЫ', ti)
 
+      // НДС с поступлений
+      + '<tr style="background:#fffbeb">'
+      + TDl('<em style="color:#92400e">НДС с поступлений</em>')
+      + TD(dash(), ';color:#9ca3af')
+      + TD(fmtK(vatD.in_25), SEP) + TD(fmtK(vatD.in_26))
+      + TD(fmtK(vatInTot, true))
+      + TD(dash())
+      + TD(fmtK(vatInCurPlan), SEP) + TD(fmtK(vatD.in_cur))
+      + vatInPlan.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
+      + '</tr>'
+
+      // Поступления без НДС = Итого доходы - НДС
+      + '<tr style="background:#f0fdf4">'
+      + TDl('<strong style="color:#15803d">Поступления без НДС</strong>')
+      + TD(dash(), ';color:#9ca3af')
+      + TD(fmtK(ti.f25 - vatD.in_25), SEP) + TD(fmtK(ti.f26 - vatD.in_26))
+      + TD(fmtK(ti.fact - vatInTot, true))
+      + TD(dash())
+      + TD(fmtK(ti.fH - vatInCurPlan), SEP) + TD(fmtK(ti.fCur - vatD.in_cur))
+      + vatInPlan.map(function(v, i) { return TD(fmtK(ti.plan[i] - v, true), i === 0 ? SEP : ''); }).join('')
+      + '</tr>'
+
       // РАСХОДЫ
       + sectionHdr('РАСХОДЫ', '#fae8e8', '#7f1d1d', '#fca5a5')
       + PROJECTS.filter(function(p) { return p !== 'Офис (ВСИП+ТТ)'; }).map(function(p) { return pRow(p, 'exp'); }).join('')
       + offExpSection()
       + totRow('ИТОГО РАСХОДЫ', te, '#fef2f2')
+
+      // НДС с выплат
+      + '<tr style="background:#fff7ed">'
+      + TDl('<em style="color:#9a3412">НДС с выплат</em>')
+      + TD(dash(), ';color:#9ca3af')
+      + TD(fmtK(vatD.out_25), SEP) + TD(fmtK(vatD.out_26))
+      + TD(fmtK(vatOutTot, true))
+      + TD(dash())
+      + TD(fmtK(vatOutCurPlan), SEP) + TD(fmtK(vatD.out_cur))
+      + vatOutPlan.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
+      + '</tr>'
+
+      // Расходы без НДС = Итого расходы - НДС
+      + '<tr style="background:#fff0f0">'
+      + TDl('<strong style="color:#991b1b">Расходы без НДС</strong>')
+      + TD(dash(), ';color:#9ca3af')
+      + TD(fmtK(te.f25 - vatD.out_25), SEP) + TD(fmtK(te.f26 - vatD.out_26))
+      + TD(fmtK(te.fact - vatOutTot, true))
+      + TD(dash())
+      + TD(fmtK(te.fH - vatOutCurPlan), SEP) + TD(fmtK(te.fCur - vatD.out_cur))
+      + vatOutPlan.map(function(v, i) { return TD(fmtK(te.plan[i] - v, true), i === 0 ? SEP : ''); }).join('')
+      + '</tr>'
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
       + sectionHdr('ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ', '#f0f4ff', '#3730a3', '#c7d2fe')
@@ -691,6 +794,17 @@
       + balCloseRow('ВСИП', vEnd, false)
       + balCloseRow('ТТ', tEnd, false)
       + balCloseRow('ИТОГО', tEnd0, true)
+
+      // Плановый остаток на конец периода
+      // Тек.мес.: tEnd0 + остаток план поступлений нетто - остаток план выплат нетто
+      // Плановые месяцы: остаток предыдущего + поступления нетто - выплаты нетто
+      + '<tr style="background:#dbeafe;font-size:10.5px">'
+      + '<td colspan="3" style="padding:2px 6px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#1e40af"><strong>Плановый остаток на конец периода</strong></td>'
+      + TD(dash())
+      + TD(dash()) + TD(dash())
+      + TD(fmtBal(planBal_cur, true), SEP) + TD(dash())
+      + planBal.map(function(v, i) { return TD(fmtBal(v, true), i === 0 ? SEP : ''); }).join('')
+      + '</tr>'
 
       // КОНТРОЛЬНАЯ СУММА
       + '<tr style="background:#1e3a5f">'
@@ -732,16 +846,19 @@
     Promise.all([
       fetchAll('transaction'),
       fetchPlanMoney(yr),
-      fetchCategories()
+      fetchCategories(),
+      fetchPls(yr).catch(function() { return []; })
     ]).then(function(results) {
       var txns      = results[0];
       var planItems = results[1];
       var catMap    = results[2];
+      var plsItems  = results[3];
       var factResult  = calcFact(txns, catMap, yr, mo);
       var planResult  = calcPlan(planItems, yr, mo, nextMonths, catMap);
+      var vat         = calcVat(plsItems, yr, mo);
       var pm          = planResult.pm;
       var offBrkPlan  = planResult.offBrkPlan;
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan);
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
