@@ -561,15 +561,16 @@
     var dalYM = dalY * 100 + dalM;
 
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
-    // Строим карту reference_id → catType по всем транзакциям расходов
+    // Строим карту по tx.id и tx.reference_id → catType (оба варианта на случай разных API)
     var refCatTypeMap = {};
     txns.forEach(function(tx) {
-      if (!tx.reference_id) return;
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
       var catName = catMap[tx.category_id] || '';
       var t = getExpCatType(catName);
-      if (t && t !== 'zero') refCatTypeMap[tx.reference_id] = t;
+      if (!t || t === 'zero') return;
+      if (tx.id)           refCatTypeMap[tx.id]           = t;
+      if (tx.reference_id) refCatTypeMap[tx.reference_id] = t;
     });
 
     // Суммируем фактические расходы и НДС по типам
@@ -581,23 +582,26 @@
       var expAmt = parseFloat(tx.outcome) || 0;
       if (!expAmt) return;
       var t = getExpCatType(catName);
-      if (!t || t === 'zero' || t === null) return;
+      if (!t || t === 'zero') return;
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3157) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
-      var t = refCatTypeMap[p.reference_id];
+      // Пробуем оба поля для привязки к транзакции
+      var t = refCatTypeMap[p.reference_id] || refCatTypeMap[p.id];
       if (!t) return;
       effVatByType[t] = (effVatByType[t] || 0) + vatAmt;
     });
 
-    // Эффективная ставка = НДС / Расходы; дефолт из DEFAULT_EFF_RATES если нет данных
+    // Эффективная ставка = НДС / Расходы.
+    // Если числитель = 0 (нет PLS-данных или привязка не сработала) — берём DEFAULT_EFF_RATES.
     var effRates = {};
     ['smr', 'mat', 'design', 'bg', 'ar', 'lz', 'buh', 'proj_other'].forEach(function(t) {
       var denom = effExpByType[t] || 0;
-      effRates[t] = denom > 0 ? (effVatByType[t] || 0) / denom : DEFAULT_EFF_RATES[t];
+      var numer = effVatByType[t] || 0;
+      effRates[t] = (denom > 0 && numer > 0) ? numer / denom : DEFAULT_EFF_RATES[t];
     });
     effRates['zero'] = 0;
 
