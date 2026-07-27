@@ -125,6 +125,14 @@
     'Проценты к уплате': 1
   };
 
+  // Типы займов/кредитов — идут в финансовую деятельность, не в доходы/расходы
+  var LOAN_CATS = {
+    'Получение займа': 1,
+    'Выплата займа': 1,
+    'Получение кредита': 1,
+    'Выплата кредита': 1
+  };
+
   var INC_TYPES = {
     'Оказание услуг': 1,
     'Возврат ДС. за заказы': 1,
@@ -416,14 +424,42 @@
     OFF_SUBCATS.forEach(function(s) {
       offBrkPlan[s.code] = {be_plan:0, hE:0, plan_e:[0,0,0,0,0,0]};
     });
+    // Плановые поступления/выплаты займов → финансовая деятельность
+    var finPlan = {
+      skIn:  {hI:0, plan:[0,0,0,0,0,0]},
+      skOut: {hE:0, plan:[0,0,0,0,0,0]}
+    };
+
     planItems.forEach(function(item) {
       var proj = PID_MAP[item.project_id];
       if (!proj) return;
-      var d   = pm[proj];
       var iy  = parseInt(item.plan_paid_date.substring(0, 4));
       var im  = parseInt(item.plan_paid_date.substring(5, 7));
       var val = item.total || 0;
       var isI = (item.type === 30), isE = (item.type === 40);
+
+      // Займы/кредиты в офисных проектах → финансовая деятельность, не в pm
+      if (OXR_PIDS[item.project_id]) {
+        var catName = (catMap && catMap[item.category_id]) || '';
+        if (LOAN_CATS[catName]) {
+          if (iy === curYear && im === curMonth) {
+            if (isI) finPlan.skIn.hI  += val;
+            if (isE) finPlan.skOut.hE += val;
+          }
+          nextMonths.forEach(function(nm, idx) {
+            var nmYM = nm.year * 100 + nm.month, itemYM = iy * 100 + im;
+            var match = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
+            if (match) {
+              if (isI) finPlan.skIn.plan[idx]  += val;
+              if (isE) finPlan.skOut.plan[idx] += val;
+            }
+          });
+          return; // не попадает в pm и offBrkPlan
+        }
+      }
+
+      // Операционные статьи — как прежде
+      var d = pm[proj];
       if (iy > curYear || (iy === curYear && im >= curMonth)) {
         if (isI) d.bi_plan += val;
         if (isE) d.be_plan += val;
@@ -444,8 +480,7 @@
       });
       // Разбивка плана по подкатегориям для офисных проектов
       if (OXR_PIDS[item.project_id] && isE) {
-        var catName = (catMap && catMap[item.category_id]) || '';
-        var sub = offSubcat(catName);
+        var sub = offSubcat(catName || (catMap && catMap[item.category_id]) || '');
         var obp = offBrkPlan[sub];
         if (iy > curYear || (iy === curYear && im >= curMonth)) obp.be_plan += val;
         if (iy === curYear && im === curMonth) obp.hE += val;
@@ -457,11 +492,11 @@
         });
       }
     });
-    return {pm: pm, offBrkPlan: offBrkPlan};
+    return {pm: pm, offBrkPlan: offBrkPlan, finPlan: finPlan};
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
@@ -613,6 +648,24 @@
         + TD(dash())
         + TD(dash(), SEP) + TD(fmtK(fCur))
         + planEmpty()
+        + '</tr>';
+    }
+
+    // Строка займов: факт + план (hPlan — тек.мес.бюджет, planArr — 6 план.месяцев)
+    function finLoanRow(label, item, hPlan, planArr) {
+      var f25 = item.f25, f26 = item.f26, tot = f25 + f26, fCur = item.fCur;
+      hPlan = hPlan || 0;
+      planArr = planArr || [0,0,0,0,0,0];
+      var hasPlan = hPlan > 0 || planArr.some(function(v) { return v > 0; });
+      if (!tot && !fCur && !hasPlan) return '';
+      return '<tr>'
+        + TDl(label, ';padding-left:14px')
+        + TD(dash(), ';color:#9ca3af')
+        + TD(fmtK(f25), SEP) + TD(fmtK(f26))
+        + TD(fmtK(tot, true))
+        + TD(dash())
+        + TD(fmtK(hPlan), SEP) + TD(fmtK(fCur))
+        + planArr.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
         + '</tr>';
     }
 
@@ -777,8 +830,8 @@
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
       + sectionHdr('ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ', '#f0f4ff', '#3730a3', '#c7d2fe')
-      + finRow('Выдача займов', fin.skOut)
-      + finRow('Получение займов', fin.skIn)
+      + finLoanRow('Выдача/Выплата займов',    fin.skOut, finPlan ? finPlan.skOut.hE   : 0, finPlan ? finPlan.skOut.plan : null)
+      + finLoanRow('Получение/Возврат займов', fin.skIn,  finPlan ? finPlan.skIn.hI    : 0, finPlan ? finPlan.skIn.plan  : null)
       + finRow('Процентные расходы', fin.int)
       + finRow('Переводы между счетами', trNet)
       + '<tr style="background:#e0e7ff">'
@@ -860,7 +913,8 @@
       var vat         = calcVat(plsItems, yr, mo);
       var pm          = planResult.pm;
       var offBrkPlan  = planResult.offBrkPlan;
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat);
+      var finPlan     = planResult.finPlan;
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
