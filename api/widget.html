@@ -795,7 +795,7 @@
     if (!vf) return '';
     var data = vf.data, dal = vf.dal, cols = vf.cols;
 
-    // ИТОГО ПЛАН = план текущего квартала и далее − факт текущего квартала
+    // ИТОГО ПЛАН = план от текущего квартала до конца − факт текущего квартала (все 4 строки)
     var itogoInc = 0, itogoVatIn = 0, itogoExp = 0, itogoVatOut = 0;
     data.forEach(function(c) {
       itogoInc    += c.incPlan;
