@@ -733,6 +733,7 @@
       var catName = catMap[item.category_id] || '';
       if (catName === 'Перевод между счетами (поступление)' ||
           catName === 'Перевод между счетами (списание)') return;
+      if (LOAN_CATS[catName]) return;  // займы — финансовая деятельность, без НДС
       if (pYM === augYM && isE) {
         var t2 = getExpCatType(catName);
         augDebug.push({cat: catName, type: t2, val: val, rate: effRates[t2] || 0, vat: Math.round(val*(effRates[t2]||0))});
@@ -747,9 +748,8 @@
       }
       if (!tgt) return;
       if (isI) {
-        var rIn = LOAN_CATS[catName] ? 0 : 22 / 122;
         tgt.incPlan   += val;
-        tgt.vatInPlan += Math.round(val * rIn);
+        tgt.vatInPlan += Math.round(val * 22 / 122);
       }
       if (isE) {
         var t = getExpCatType(catName);
