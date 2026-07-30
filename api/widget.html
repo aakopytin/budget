@@ -621,7 +621,7 @@
     txns.forEach(function(tx) {
       if (!tx.id) return;
       var aid = tx.org_account_id;
-      if (!VSIP_ACC_IDS[aid]) return;  // только ВСИП (плательщик НДС)
+      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;  // ВСИП + ТТ
       var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
       if (txYear !== curYear) return;
       var catName = catMap[tx.category_id] || '';
@@ -645,10 +645,9 @@
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
     // PLS 3144 — НДС к вычету (input VAT per purchase): p.reference_id = id связанной транзакции.
-    // Исключаем трансферы (project_id=27) и только ВСИП (org_id=1).
+    // ВСИП + ТТ платят НДС. Исключаем только трансферы (project_id=27).
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
-      if (p.org_id !== 1) return;
       if (p.project_id === TR_PID) return;  // трансферы не считаем
       var pYear = p.date ? parseInt(p.date.substring(0, 4)) : 0;
       if (pYear !== curYear) return;
@@ -722,11 +721,9 @@
       }
     });
 
-    // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, input VAT per purchase)
-    // org_id=1, без трансферов (project_id≠27) — как "НДС проекты + офисные" в nds.html
+    // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, ВСИП + ТТ, без трансферов)
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
-      if (p.org_id !== 1) return;
       if (p.project_id === TR_PID) return;  // исключаем трансферы ВСИП↔ТТ
       var dt = p.date || '';
       if (dt.length < 7) return;
@@ -804,7 +801,7 @@
     dal.vatIn  = dal.vatInPlan;
     dal.vatOut = dal.vatOutPlan;
 
-    var pls3144all    = (plsItems||[]).filter(function(p){return p.category_id===3144 && p.org_id===1;});
+    var pls3144all    = (plsItems||[]).filter(function(p){return p.category_id===3144;});
     var pls3144count  = pls3144all.length;
     var pls3144tr     = pls3144all.filter(function(p){return p.project_id===TR_PID;});
     var pls3144trSum  = pls3144tr.reduce(function(s,p){return s+(parseFloat(p.outcome)||0);},0);
@@ -949,7 +946,7 @@
     var totalEffExp = Object.keys(vf.effExpByType||{}).reduce(function(s,k){return s+(vf.effExpByType[k]||0);},0);
     var totalEffVat = Object.keys(vf.effVatByType||{}).reduce(function(s,k){return s+(vf.effVatByType[k]||0);},0);
     var diagStr = '<div style="font-size:10px;color:#6b7280;padding:2px 6px 4px">'
-      + 'PLS 3144 org_id=1: ' + (vf.pls3144count||0) + ' зап. · '
+      + 'PLS 3144 (ВСИП+ТТ): ' + (vf.pls3144count||0) + ' зап. · '
       + 'трансферы исключены: ' + Math.round((vf.pls3144trSum||0)/1000) + ' тыс. · '
       + 'tx→catType: ' + (vf.refMapKeys||0) + ' · '
       + 'НДС совпало: ' + Math.round(totalEffVat/1000) + ' тыс.'
