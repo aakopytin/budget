@@ -795,20 +795,24 @@
     if (!vf) return '';
     var data = vf.data, dal = vf.dal, cols = vf.cols;
 
-    // ИТОГО ПЛАН = сумма всех 10 колонок минус факт прошлых месяцев текущего квартала
-    function colSum(fn) {
-      var s = 0;
-      data.forEach(function(c) { s += fn(c); });
-      s += fn(dal);
-      for (var ci = 0; ci < 3; ci++) {
-        if (data[ci].isPast) s -= fn(data[ci]);
-      }
-      return s;
+    // ИТОГО ПЛАН = план текущего квартала и далее − факт текущего квартала
+    var itogoInc = 0, itogoVatIn = 0, itogoExp = 0, itogoVatOut = 0;
+    data.forEach(function(c) {
+      itogoInc    += c.incPlan;
+      itogoVatIn  += c.vatInPlan;
+      itogoExp    += c.expPlan;
+      itogoVatOut += c.vatOutPlan;
+    });
+    itogoInc    += dal.incPlan;
+    itogoVatIn  += dal.vatInPlan;
+    itogoExp    += dal.expPlan;
+    itogoVatOut += dal.vatOutPlan;
+    for (var ci = 0; ci < 3; ci++) {
+      itogoInc    -= data[ci].incFact;
+      itogoVatIn  -= data[ci].vatInFact;
+      itogoExp    -= data[ci].expFact;
+      itogoVatOut -= data[ci].vatOutFact;
     }
-    var itogoInc    = colSum(function(c) { return c.inc; });
-    var itogoVatIn  = colSum(function(c) { return c.vatIn; });
-    var itogoExp    = colSum(function(c) { return c.exp; });
-    var itogoVatOut = colSum(function(c) { return c.vatOut; });
     var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
 
     var MO = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
