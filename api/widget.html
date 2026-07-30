@@ -687,10 +687,11 @@
       var projName = PID_MAP[tx.project_id] || '';
       if (catName === 'Перевод между счетами (поступление)' ||
           catName === 'Перевод между счетами (списание)') return;
+      if (LOAN_CATS[catName]) return;  // займы — финансовая деятельность, не в НДС
       var incAmt = parseFloat(tx.income)  || 0;
       var expAmt = parseFloat(tx.outcome) || 0;
-      var isInc = isIncome(catName) || (LOAN_CATS[catName] && incAmt > 0);
-      var isExp = isExpense(catName, projName) || (LOAN_CATS[catName] && expAmt > 0);
+      var isInc = isIncome(catName);
+      var isExp = isExpense(catName, projName);
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === tYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (incAmt > 0 && isInc) data[ci].incFact += incAmt;
