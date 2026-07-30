@@ -377,7 +377,9 @@
       return [];
     });
     return Promise.all([req1, req2]).then(function(res) {
-      var combined = res[0].concat(res[1]);
+      // Если req1 вернул данные — используем только его (req2 содержит те же записи,
+      // конкатенация привела бы к двойному счёту).
+      var combined = res[0].length > 0 ? res[0] : res[1];
       return combined.filter(function(i) {
         if (!i.date) return false;
         var iy = parseInt(i.date.substring(0, 4));
@@ -639,9 +641,10 @@
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
     // PLS 3144 — НДС к вычету (input VAT per purchase): reference_id совпадает с tx.reference_id.
-    // Та же категория, что в nds.html. Cap 22/122 защищает от аномальных совпадений.
+    // Та же категория, что в nds.html. Только org_id=1 (ВСИП). Cap 22/122 защищает от аномалий.
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
+      if (p.org_id !== 1) return;  // только ВСИП — плательщик НДС
       var pYear = p.date ? parseInt(p.date.substring(0, 4)) : 0;
       if (pYear !== curYear) return;
       var vatAmt = parseFloat(p.outcome) || 0;
@@ -715,9 +718,10 @@
     });
 
     // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, input VAT per purchase)
-    // Та же категория что nds.html (expVat = sum of 3144 outcomes)
+    // Та же категория что nds.html (expVat = sum of 3144 outcomes, org_id=1 only, трансферы исключены)
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
+      if (p.org_id !== 1) return;  // только ВСИП (org_id=1), как в nds.html
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
