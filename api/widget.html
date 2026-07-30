@@ -381,10 +381,10 @@
       return combined.filter(function(i) {
         if (!i.date) return false;
         var iy = parseInt(i.date.substring(0, 4));
-        // 1000 = НДС начисленный (output VAT, income), 3144 = НДС к вычету (input VAT, outcome)
-        // 3147 = возврат НДС из бюджета
+        // 3144 = НДС к вычету (input VAT, outcome) — единственная категория в transaction_pls
+        // category_id=1000 (НДС начисленный) в transaction_pls не существует
         return (iy === curYear || iy === prevYear)
-            && (i.category_id === 1000 || i.category_id === 3144 || i.category_id === 3147);
+            && (i.category_id === 3144 || i.category_id === 3147);
       });
     });
   }
@@ -705,16 +705,25 @@
       }
     });
 
-    // ── Шаг 4: факт — PLS (1000 = НДС начисленный/income, 3144 = НДС к вычету/outcome)
-    // Те же категории, что использует nds.html
+    // ── Шаг 4a: vatInFact = incFact × 22/122
+    // category_id=1000 (НДС начисленный) отсутствует в transaction_pls.
+    // Начисленный НДС точно равен 22/122 от суммы поступлений по ставке 22%.
+    data.forEach(function(c) {
+      if (c.isPast || c.isCurrent) {
+        c.vatInFact = Math.round(c.incFact * 22 / 122);
+      }
+    });
+
+    // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, input VAT per purchase)
+    // Та же категория что nds.html (expVat = sum of 3144 outcomes)
     (plsItems || []).forEach(function(p) {
+      if (p.category_id !== 3144) return;
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (p.category_id === 1000) data[ci].vatInFact  += parseFloat(p.income)  || 0;
-          if (p.category_id === 3144) data[ci].vatOutFact += parseFloat(p.outcome) || 0;
+          data[ci].vatOutFact += parseFloat(p.outcome) || 0;
           break;
         }
       }
@@ -785,12 +794,11 @@
     dal.vatIn  = dal.vatInPlan;
     dal.vatOut = dal.vatOutPlan;
 
-    var pls1000count  = (plsItems||[]).filter(function(p){return p.category_id===1000;}).length;
     var pls3144count  = (plsItems||[]).filter(function(p){return p.category_id===3144;}).length;
     var refMapKeys    = Object.keys(refCatTypeMap).length;
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
-            pls1000count: pls1000count, pls3144count: pls3144count, refMapKeys: refMapKeys,
+            pls3144count: pls3144count, refMapKeys: refMapKeys,
             rejectedIncCats: rejectedIncCats};
   }
 
@@ -928,7 +936,6 @@
     var totalEffExp = Object.keys(vf.effExpByType||{}).reduce(function(s,k){return s+(vf.effExpByType[k]||0);},0);
     var totalEffVat = Object.keys(vf.effVatByType||{}).reduce(function(s,k){return s+(vf.effVatByType[k]||0);},0);
     var diagStr = '<div style="font-size:10px;color:#6b7280;padding:2px 6px 4px">'
-      + 'PLS 1000 (выручка): ' + (vf.pls1000count||0) + ' · '
       + 'PLS 3144 (вычет): ' + (vf.pls3144count||0) + ' · '
       + 'tx с reference_id: ' + (vf.refMapKeys||0) + ' · '
       + 'Расходы-факт: ' + Math.round(totalEffExp/1000) + ' тыс. · '
