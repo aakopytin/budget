@@ -4,7 +4,7 @@
 
 const https = require('https');
 
-const ALLOWED = ['plan_money', 'transaction', 'categories'];
+const ALLOWED = ['plan_money', 'transaction', 'categories', 'transaction_pls'];
 
 function httpsGet(url) {
   return new Promise(function(resolve, reject) {
