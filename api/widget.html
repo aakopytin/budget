@@ -613,17 +613,21 @@
     // Алгоритм как в nds.js: tx.reference_id → catType, PLS 3144 тоже ищет по reference_id.
     // Обе записи (транзакция и PLS) разделяют один и тот же reference_id документа.
     // Ограничиваем период: только curYear (совпадает с периодом расчёта ставок).
+    // refCatTypeMap: tx.id → catType.
+    // PLS-запись хранит reference_id = id связанной транзакции расхода,
+    // поэтому ключ — tx.id, а не tx.reference_id.
+    var TR_PID = 27;  // project_id переводов ВСИП↔ТТ, как в nds.html
     var refCatTypeMap = {};
     txns.forEach(function(tx) {
-      if (!tx.reference_id) return;
+      if (!tx.id) return;
       var aid = tx.org_account_id;
-      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      if (!VSIP_ACC_IDS[aid]) return;  // только ВСИП (плательщик НДС)
       var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
       if (txYear !== curYear) return;
       var catName = catMap[tx.category_id] || '';
       var t = getExpCatType(catName);
       if (!t || t === 'zero') return;
-      refCatTypeMap[tx.reference_id] = t;
+      refCatTypeMap[tx.id] = t;
     });
 
     // Суммируем фактические расходы и НДС по типам
@@ -640,16 +644,17 @@
       if (!t || t === 'zero') return;
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
-    // PLS 3144 — НДС к вычету (input VAT per purchase): reference_id совпадает с tx.reference_id.
-    // Та же категория, что в nds.html. Только org_id=1 (ВСИП). Cap 22/122 защищает от аномалий.
+    // PLS 3144 — НДС к вычету (input VAT per purchase): p.reference_id = id связанной транзакции.
+    // Исключаем трансферы (project_id=27) и только ВСИП (org_id=1).
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
-      if (p.org_id !== 1) return;  // только ВСИП — плательщик НДС
+      if (p.org_id !== 1) return;
+      if (p.project_id === TR_PID) return;  // трансферы не считаем
       var pYear = p.date ? parseInt(p.date.substring(0, 4)) : 0;
       if (pYear !== curYear) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
-      var t = refCatTypeMap[p.reference_id];
+      var t = refCatTypeMap[p.reference_id];  // p.reference_id = tx.id
       if (!t) return;
       effVatByType[t] = (effVatByType[t] || 0) + vatAmt;
     });
@@ -718,10 +723,11 @@
     });
 
     // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, input VAT per purchase)
-    // Та же категория что nds.html (expVat = sum of 3144 outcomes, org_id=1 only, трансферы исключены)
+    // org_id=1, без трансферов (project_id≠27) — как "НДС проекты + офисные" в nds.html
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
-      if (p.org_id !== 1) return;  // только ВСИП (org_id=1), как в nds.html
+      if (p.org_id !== 1) return;
+      if (p.project_id === TR_PID) return;  // исключаем трансферы ВСИП↔ТТ
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -798,12 +804,15 @@
     dal.vatIn  = dal.vatInPlan;
     dal.vatOut = dal.vatOutPlan;
 
-    var pls3144count  = (plsItems||[]).filter(function(p){return p.category_id===3144;}).length;
+    var pls3144all    = (plsItems||[]).filter(function(p){return p.category_id===3144 && p.org_id===1;});
+    var pls3144count  = pls3144all.length;
+    var pls3144tr     = pls3144all.filter(function(p){return p.project_id===TR_PID;});
+    var pls3144trSum  = pls3144tr.reduce(function(s,p){return s+(parseFloat(p.outcome)||0);},0);
     var refMapKeys    = Object.keys(refCatTypeMap).length;
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
-            pls3144count: pls3144count, refMapKeys: refMapKeys,
-            rejectedIncCats: rejectedIncCats};
+            pls3144count: pls3144count, pls3144trSum: pls3144trSum,
+            refMapKeys: refMapKeys, rejectedIncCats: rejectedIncCats};
   }
 
   function buildVatForecastTable(vf) {
@@ -940,9 +949,9 @@
     var totalEffExp = Object.keys(vf.effExpByType||{}).reduce(function(s,k){return s+(vf.effExpByType[k]||0);},0);
     var totalEffVat = Object.keys(vf.effVatByType||{}).reduce(function(s,k){return s+(vf.effVatByType[k]||0);},0);
     var diagStr = '<div style="font-size:10px;color:#6b7280;padding:2px 6px 4px">'
-      + 'PLS 3144 (вычет): ' + (vf.pls3144count||0) + ' · '
-      + 'tx с reference_id: ' + (vf.refMapKeys||0) + ' · '
-      + 'Расходы-факт: ' + Math.round(totalEffExp/1000) + ' тыс. · '
+      + 'PLS 3144 org_id=1: ' + (vf.pls3144count||0) + ' зап. · '
+      + 'трансферы исключены: ' + Math.round((vf.pls3144trSum||0)/1000) + ' тыс. · '
+      + 'tx→catType: ' + (vf.refMapKeys||0) + ' · '
       + 'НДС совпало: ' + Math.round(totalEffVat/1000) + ' тыс.'
       + (_pls3144err ? ' <span style="color:#dc2626">⚠ req2: ' + _pls3144err + '</span>' : '')
       + '</div>';
