@@ -857,7 +857,7 @@
     h2 += '<th style="' + HS + ';' + BL + ';color:#1d4ed8">ИТОГО</th>';
     h2 += '</tr>';
 
-    function dataRow(label, fn, vatColor) {
+    function dataRow(label, fn, vatColor, itogoVal) {
       var row = '<tr>';
       var ls = 'padding:2px 5px;font-size:11px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151';
       row += '<td style="' + ls + '">' + label + '</td>';
@@ -871,7 +871,7 @@
       var dalV = fn(dal);
       var dSt = 'padding:2px 5px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : '');
       row += '<td style="' + dSt + '">' + fv(dalV) + '</td>';
-      var iV = colSum(fn);
+      var iV = itogoVal;
       var iSt = 'padding:2px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : ';color:#1d4ed8');
       row += '<td style="' + iSt + '">' + fv(iV) + '</td>';
       row += '</tr>';
@@ -950,10 +950,10 @@
       + 'НДС ПРОГНОЗ (тыс. руб.)</div>'
       + '<table style="border-collapse:collapse;width:100%">'
       + h1 + h2
-      + dataRow('Поступления',        function(c) { return c.inc; })
-      + dataRow('НДС с поступлений',  function(c) { return c.vatIn; },  '#92400e')
-      + dataRow('Выплаты',            function(c) { return c.exp; })
-      + dataRow('НДС с выплат',       function(c) { return c.vatOut; }, '#92400e')
+      + dataRow('Поступления',        function(c) { return c.inc; },    undefined,  itogoInc)
+      + dataRow('НДС с поступлений',  function(c) { return c.vatIn; },  '#92400e',  itogoVatIn)
+      + dataRow('Выплаты',            function(c) { return c.exp; },    undefined,  itogoExp)
+      + dataRow('НДС с выплат',       function(c) { return c.vatOut; }, '#92400e',  itogoVatOut)
       + resRow('Плановый результат (без НДС)')
       + '</table>'
       + rateTable
