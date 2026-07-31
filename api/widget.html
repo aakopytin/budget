@@ -326,7 +326,7 @@
       return items.filter(function(i) {
         if (!i.plan_paid_date) return false;
         var iy = parseInt(i.plan_paid_date.substring(0, 4));
-        return iy >= curYear && i.org_account_id === 36;
+        return iy >= curYear;  // org_account_id фильтруется в Step 5
       });
     });
   }
@@ -610,13 +610,20 @@
     var dalYM = dalY * 100 + dalM;
 
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
-    // Алгоритм как в nds.js: tx.reference_id → catType, PLS 3144 тоже ищет по reference_id.
-    // Обе записи (транзакция и PLS) разделяют один и тот же reference_id документа.
-    // Ограничиваем период: только curYear (совпадает с периодом расчёта ставок).
-    // refCatTypeMap: tx.id → catType.
-    // PLS-запись хранит reference_id = id связанной транзакции расхода,
-    // поэтому ключ — tx.id, а не tx.reference_id.
     var TR_PID = 27;  // project_id переводов ВСИП↔ТТ, как в nds.html
+
+    // Карта plan_money.id → catType.
+    // PLS-запись содержит plan_money_id — прямую FK на план. У плана есть category_id.
+    // Это надёжнее чем reference_id (неизвестная цепочка).
+    var planMoneyTypeMap = {};
+    (planItems || []).forEach(function(pm) {
+      if (!pm.id) return;
+      var catName = catMap[pm.category_id] || '';
+      var t = getExpCatType(catName);
+      if (t && t !== 'zero') planMoneyTypeMap[pm.id] = t;
+    });
+
+    // Резервная карта: tx.id → catType (если plan_money_id не совпал).
     var refCatTypeMap = {};
     txns.forEach(function(tx) {
       if (!tx.id) return;
@@ -644,8 +651,8 @@
       if (!t || t === 'zero') return;
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
-    // PLS 3144 — НДС к вычету (input VAT per purchase): p.reference_id = id связанной транзакции.
-    // ВСИП + ТТ платят НДС. Исключаем только трансферы (project_id=27).
+    // PLS 3144 — НДС к вычету. ВСИП + ТТ, без трансферов (project_id=27).
+    // Поиск категории: 1) plan_money_id → planMoneyTypeMap, 2) reference_id → refCatTypeMap.
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
       if (p.project_id === TR_PID) return;  // трансферы не считаем
@@ -653,7 +660,7 @@
       if (pYear !== curYear) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
-      var t = refCatTypeMap[p.reference_id];  // p.reference_id = tx.id
+      var t = planMoneyTypeMap[p.plan_money_id] || refCatTypeMap[p.reference_id];
       if (!t) return;
       effVatByType[t] = (effVatByType[t] || 0) + vatAmt;
     });
@@ -741,6 +748,7 @@
     var augYM = curYear * 100 + (curMonth === 12 ? 1 : curMonth + 1);
     var augDebug = [];
     (planItems || []).forEach(function(item) {
+      if (item.org_account_id !== 36) return;  // только ВСИП Бюджет (план)
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -806,10 +814,11 @@
     var pls3144tr     = pls3144all.filter(function(p){return p.project_id===TR_PID;});
     var pls3144trSum  = pls3144tr.reduce(function(s,p){return s+(parseFloat(p.outcome)||0);},0);
     var refMapKeys    = Object.keys(refCatTypeMap).length;
+    var pmMapKeys     = Object.keys(planMoneyTypeMap).length;
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
             pls3144count: pls3144count, pls3144trSum: pls3144trSum,
-            refMapKeys: refMapKeys, rejectedIncCats: rejectedIncCats};
+            refMapKeys: refMapKeys, pmMapKeys: pmMapKeys, rejectedIncCats: rejectedIncCats};
   }
 
   function buildVatForecastTable(vf) {
@@ -948,6 +957,7 @@
     var diagStr = '<div style="font-size:10px;color:#6b7280;padding:2px 6px 4px">'
       + 'PLS 3144 (ВСИП+ТТ): ' + (vf.pls3144count||0) + ' зап. · '
       + 'трансферы исключены: ' + Math.round((vf.pls3144trSum||0)/1000) + ' тыс. · '
+      + 'plan_money: ' + (vf.pmMapKeys||0) + ' · '
       + 'tx→catType: ' + (vf.refMapKeys||0) + ' · '
       + 'НДС совпало: ' + Math.round(totalEffVat/1000) + ' тыс.'
       + (_pls3144err ? ' <span style="color:#dc2626">⚠ req2: ' + _pls3144err + '</span>' : '')
