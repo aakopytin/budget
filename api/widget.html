@@ -786,9 +786,9 @@
         col.vatOut = col.vatOutFact;
       } else if (col.isCurrent) {
         col.inc    = col.incPlan    > 0 ? Math.max(col.incFact,    col.incPlan)    : col.incFact;
-        col.exp    = col.expPlan    > 0 ? Math.max(col.expFact,    col.expPlan)    : col.expFact;
+        col.exp    = col.expPlan    > 0 ? col.expPlan    : col.expFact;
         col.vatIn  = col.vatInPlan  > 0 ? Math.max(col.vatInFact,  col.vatInPlan)  : col.vatInFact;
-        col.vatOut = col.vatOutPlan > 0 ? Math.max(col.vatOutFact, col.vatOutPlan) : col.vatOutFact;
+        col.vatOut = col.vatOutPlan > 0 ? col.vatOutPlan : col.vatOutFact;
       } else {
         col.inc    = col.incPlan;
         col.exp    = col.expPlan;
