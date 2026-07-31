@@ -635,21 +635,6 @@
       if (t && t !== 'zero') planMoneyTypeMap[pm.id] = t;
     });
 
-    // Резервная карта: tx.id → catType (если plan_money_id не совпал).
-    var refCatTypeMap = {};
-    txns.forEach(function(tx) {
-      if (!tx.id) return;
-      var aid = tx.org_account_id;
-      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
-      var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
-      var txM    = tx.date ? parseInt(tx.date.substring(5, 7)) : 0;
-      if (txYear !== effQYear || txM < effQStartM || txM > effQEndM) return;
-      var catName = catMap[tx.category_id] || '';
-      var t = getExpCatType(catName);
-      if (!t || t === 'zero') return;
-      refCatTypeMap[tx.id] = t;
-    });
-
     // Суммируем фактические расходы и НДС по типам за effQ-период.
     var effExpByType = {}, effVatByType = {};
     txns.forEach(function(tx) {
@@ -666,7 +651,8 @@
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
     // PLS 3144 — НДС к вычету за effQ-период. ВСИП + ТТ, без трансферов (project_id=27).
-    // Поиск категории: 1) plan_money_id → planMoneyTypeMap, 2) reference_id → refCatTypeMap.
+    // Классификация только через plan_money_id → planMoneyTypeMap.
+    // reference_id → tx.id НЕ является надёжной ссылкой (разные суммы), fallback убран.
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
       if (p.project_id === TR_PID) return;
@@ -675,7 +661,7 @@
       if (pYear !== effQYear || pM < effQStartM || pM > effQEndM) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
-      var t = planMoneyTypeMap[p.plan_money_id] || refCatTypeMap[p.reference_id];
+      var t = planMoneyTypeMap[p.plan_money_id];
       if (!t) return;
       effVatByType[t] = (effVatByType[t] || 0) + vatAmt;
     });
@@ -828,12 +814,11 @@
     var pls3144count  = pls3144all.length;
     var pls3144tr     = pls3144all.filter(function(p){return p.project_id===TR_PID;});
     var pls3144trSum  = pls3144tr.reduce(function(s,p){return s+(parseFloat(p.outcome)||0);},0);
-    var refMapKeys    = Object.keys(refCatTypeMap).length;
     var pmMapKeys     = Object.keys(planMoneyTypeMap).length;
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
             pls3144count: pls3144count, pls3144trSum: pls3144trSum,
-            refMapKeys: refMapKeys, pmMapKeys: pmMapKeys, effQLabel: effQLabel,
+            pmMapKeys: pmMapKeys, effQLabel: effQLabel,
             rejectedIncCats: rejectedIncCats};
   }
 
@@ -975,7 +960,6 @@
       + 'PLS 3144: ' + (vf.pls3144count||0) + ' зап. · '
       + 'трансферы: ' + Math.round((vf.pls3144trSum||0)/1000) + ' тыс. · '
       + 'plan_money: ' + (vf.pmMapKeys||0) + ' · '
-      + 'tx→catType: ' + (vf.refMapKeys||0) + ' · '
       + 'НДС совпало: ' + Math.round(totalEffVat/1000) + ' тыс.'
       + (_pls3144err ? ' <span style="color:#dc2626">⚠ req2: ' + _pls3144err + '</span>' : '')
       + '</div>';
