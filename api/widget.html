@@ -612,18 +612,11 @@
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
     var TR_PID = 27;  // project_id переводов ВСИП↔ТТ, как в nds.html
 
-    // Период для расчёта ставок = предыдущий завершённый квартал.
-    // Текущий квартал частично не заполнен → берём предыдущий для стабильной выборки.
-    var curQIdx = Math.floor((curMonth - 1) / 3);  // 0=Q1, 1=Q2, 2=Q3, 3=Q4
-    var effQYear, effQStartM, effQEndM, effQLabel;
-    if (curQIdx === 0) {
-      effQYear = curYear - 1; effQStartM = 10; effQEndM = 12; effQLabel = 'Q4 ' + (curYear-1);
-    } else {
-      effQYear   = curYear;
-      effQStartM = (curQIdx - 1) * 3 + 1;
-      effQEndM   = curQIdx * 3;
-      effQLabel  = 'Q' + curQIdx + ' ' + curYear;
-    }
+    // Период для расчёта ставок = весь текущий год (curYear).
+    var effQYear  = curYear;
+    var effQStartM = 1;
+    var effQEndM   = 12;
+    var effQLabel  = String(curYear);
 
     // Карта plan_money.id → catType.
     // PLS-запись содержит plan_money_id — прямую FK на план. У плана есть category_id.
@@ -635,14 +628,13 @@
       if (t && t !== 'zero') planMoneyTypeMap[pm.id] = t;
     });
 
-    // Суммируем фактические расходы и НДС по типам за effQ-период.
+    // Суммируем фактические расходы и НДС по типам за весь curYear.
     var effExpByType = {}, effVatByType = {};
     txns.forEach(function(tx) {
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
       var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
-      var txM    = tx.date ? parseInt(tx.date.substring(5, 7)) : 0;
-      if (txYear !== effQYear || txM < effQStartM || txM > effQEndM) return;
+      if (txYear !== effQYear) return;
       var catName = catMap[tx.category_id] || '';
       var expAmt = parseFloat(tx.outcome) || 0;
       if (!expAmt) return;
@@ -650,15 +642,14 @@
       if (!t || t === 'zero') return;
       effExpByType[t] = (effExpByType[t] || 0) + expAmt;
     });
-    // PLS 3144 — НДС к вычету за effQ-период. ВСИП + ТТ, без трансферов (project_id=27).
+    // PLS 3144 — НДС к вычету за весь curYear. ВСИП + ТТ, без трансферов (project_id=27).
     // Классификация только через plan_money_id → planMoneyTypeMap.
     // reference_id → tx.id НЕ является надёжной ссылкой (разные суммы), fallback убран.
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
       if (p.project_id === TR_PID) return;
       var pYear = p.date ? parseInt(p.date.substring(0, 4)) : 0;
-      var pM    = p.date ? parseInt(p.date.substring(5, 7)) : 0;
-      if (pYear !== effQYear || pM < effQStartM || pM > effQEndM) return;
+      if (pYear !== effQYear) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
       var t = planMoneyTypeMap[p.plan_money_id];
