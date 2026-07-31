@@ -672,7 +672,7 @@
     function makeSlot() {
       return {
         inc: 0, exp: 0, vatIn: 0, vatOut: 0,
-        incFact: 0, expFact: 0, expFactNoBud: 0, vatInFact: 0, vatOutFact: 0,
+        incFact: 0, expFact: 0, expFactBud: 0, vatInFact: 0, vatOutFact: 0,
         incPlan: 0, expPlan: 0, vatInPlan: 0, vatOutPlan: 0
       };
     }
@@ -685,12 +685,11 @@
     });
     var dal = makeSlot();
 
-    // ── Шаг 2b: собираем множество бюджетных категорий по месяцу (acc=36) ─
-    // budgetedCatsByYM[ym] = Set catName — категории, присутствующие в бюджете (acc=36) данного месяца
+    // ── Шаг 2b: множество бюджетных (project_id, category_id) из acc=36 по месяцу ─
+    // Ключ: ym → catName → 1. Используется для вычисления остатка бюджета.
     var budgetedCatsByYM = {};
     (planItems || []).forEach(function(item) {
-      if (item.org_account_id !== 36) return;
-      if (item.type !== 40) return;  // только расходные записи
+      if (item.org_account_id !== 36 || item.type !== 40) return;
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -716,14 +715,16 @@
       var incAmt = parseFloat(tx.income)  || 0;
       var expAmt = parseFloat(tx.outcome) || 0;
       var isInc = isIncome(catName);
-      // Категория считается бюджетной, если есть запись acc=36 для данного YM
-      var isBud = !!(budgetedCatsByYM[tYM] && budgetedCatsByYM[tYM][catName]);
+      var isExp = isExpense(catName, projName);
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === tYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (incAmt > 0 && isInc) data[ci].incFact += incAmt;
           if (incAmt > 0 && !isInc) rejectedIncCats[catName] = (rejectedIncCats[catName] || 0) + incAmt;
-          if (expAmt > 0 && isBud)            data[ci].expFact    += expAmt;  // факт по бюджетным статьям
-          if (expAmt > 0 && !isInc && !isBud) data[ci].expFactNoBud += expAmt;  // факт без бюджета
+          if (expAmt > 0 && isExp) {
+            data[ci].expFact += expAmt;  // весь isExpense-факт (включая внебюджетные типа Кирова)
+            if (budgetedCatsByYM[tYM] && budgetedCatsByYM[tYM][catName])
+              data[ci].expFactBud += expAmt;  // только статьи, присутствующие в acc=36
+          }
           break;
         }
       }
@@ -805,9 +806,9 @@
       } else if (col.isCurrent) {
         col.inc   = col.incPlan > 0 ? Math.max(col.incFact, col.incPlan) : col.incFact;
         col.vatIn = col.vatInPlan > 0 ? Math.max(col.vatInFact, col.vatInPlan) : col.vatInFact;
-        // Выплаты = факт без бюджета + остаток бюджета ВСИП (acc=36)
-        var remBud  = Math.max(0, col.expPlan - col.expFact);
-        col.exp     = col.expFactNoBud + (col.expPlan > 0 ? remBud : col.expFact);
+        // Выплаты = expFact (весь isExpense, включая внебюджетный) + остаток только по бюджетным статьям
+        var remBud  = Math.max(0, col.expPlan - col.expFactBud);
+        col.exp     = col.expFact + remBud;
         // НДС = фактический НДС (PLS 3144) + расчёт от остатка бюджета
         var remRate = col.expPlan > 0 ? col.vatOutPlan / col.expPlan : 0;
         col.vatOut  = col.vatOutFact + Math.round(remBud * remRate);
