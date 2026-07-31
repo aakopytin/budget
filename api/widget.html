@@ -524,6 +524,7 @@
     };
 
     planItems.forEach(function(item) {
+      if (item.org_account_id !== 36) return;  // только ВСИП Бюджетный лимит
       var proj = PID_MAP[item.project_id];
       if (!proj) return;
       var iy  = parseInt(item.plan_paid_date.substring(0, 4));
@@ -671,7 +672,7 @@
     function makeSlot() {
       return {
         inc: 0, exp: 0, vatIn: 0, vatOut: 0,
-        incFact: 0, expFact: 0, vatInFact: 0, vatOutFact: 0,
+        incFact: 0, expFact: 0, expFactNoBud: 0, vatInFact: 0, vatOutFact: 0,
         incPlan: 0, expPlan: 0, vatInPlan: 0, vatOutPlan: 0
       };
     }
@@ -705,7 +706,8 @@
         if (cols[ci].ym === tYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (incAmt > 0 && isInc) data[ci].incFact += incAmt;
           if (incAmt > 0 && !isInc) rejectedIncCats[catName] = (rejectedIncCats[catName] || 0) + incAmt;
-          if (expAmt && isExp) data[ci].expFact += expAmt;
+          if (expAmt > 0 && isExp)             data[ci].expFact    += expAmt;  // бюджетные статьи
+          if (expAmt > 0 && !isInc && !isExp)  data[ci].expFactNoBud += expAmt;  // небюджетные статьи
           break;
         }
       }
@@ -736,7 +738,7 @@
     });
 
     // (debug-таблицы рендерятся в buildVatForecastTable)
-    // ── Шаг 5: план — plan_money (org_account_id=36), эффективные ставки ─
+    // ── Шаг 5: план — только ВСИП Бюджетный лимит (org_account_id=36) ────
     var augYM = curYear * 100 + (curMonth === 12 ? 1 : curMonth + 1);
     var augDebug = [];
     (planItems || []).forEach(function(item) {
@@ -785,10 +787,14 @@
         col.vatIn  = col.vatInFact;
         col.vatOut = col.vatOutFact;
       } else if (col.isCurrent) {
-        col.inc    = col.incPlan    > 0 ? Math.max(col.incFact,    col.incPlan)    : col.incFact;
-        col.exp    = col.expPlan    > 0 ? col.expPlan    : col.expFact;
-        col.vatIn  = col.vatInPlan  > 0 ? Math.max(col.vatInFact,  col.vatInPlan)  : col.vatInFact;
-        col.vatOut = col.vatOutPlan > 0 ? col.vatOutPlan : col.vatOutFact;
+        col.inc   = col.incPlan > 0 ? Math.max(col.incFact, col.incPlan) : col.incFact;
+        col.vatIn = col.vatInPlan > 0 ? Math.max(col.vatInFact, col.vatInPlan) : col.vatInFact;
+        // Выплаты = факт без бюджета + остаток бюджета ВСИП (acc=36)
+        var remBud  = Math.max(0, col.expPlan - col.expFact);
+        col.exp     = col.expFactNoBud + (col.expPlan > 0 ? remBud : col.expFact);
+        // НДС = фактический НДС (PLS 3144) + расчёт от остатка бюджета
+        var remRate = col.expPlan > 0 ? col.vatOutPlan / col.expPlan : 0;
+        col.vatOut  = col.vatOutFact + Math.round(remBud * remRate);
       } else {
         col.inc    = col.incPlan;
         col.exp    = col.expPlan;
