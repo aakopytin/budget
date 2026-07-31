@@ -1055,7 +1055,7 @@
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
@@ -1247,14 +1247,42 @@
     var ctrl = tSt0 + (ti.f26 + finIn26) - (te.f26 + finOut26) - tEnd0;
     var cOk  = Math.abs(ctrl) < 1000;
 
-    // === НДС: ставки временно обнулены (TODO: уточнить методику расчёта) ===
     var vatD = {in_25:0, in_26:0, in_cur:0, out_25:0, out_26:0, out_cur:0};
-    var effVatIn = 0, effVatOut = 0;
-    // Плановый НДС по каждому из 6 месяцев
-    var vatInPlan  = ti.plan.map(function(v) { return Math.round(v * effVatIn); });
-    var vatOutPlan = te.plan.map(function(v) { return Math.round(v * effVatOut); });
-    var vatInCurPlan  = Math.round(ti.fH * effVatIn);
-    var vatOutCurPlan = Math.round(te.fH * effVatOut);
+    // НДС Прогноз → Сводный отчёт: сдвиг на квартал
+    // Текущий квартал (Q0) → следующий (Q+1): 1/3 в каждый месяц
+    // Q+1 → "+дальше" (Q+2): одной суммой
+    var vatInPlan  = [0,0,0,0,0,0];
+    var vatOutPlan = [0,0,0,0,0,0];
+    var vatInCurPlan  = 0;
+    var vatOutCurPlan = 0;
+    if (vf && vf.data) {
+      var _getQ = function(m) { return Math.ceil(m / 3); };
+      var curQ   = _getQ(curMonth);                           // 1-4
+      var nextQ  = (curQ % 4) + 1;
+      var nextQY = (curQ === 4) ? curYear + 1 : curYear;
+      // Суммируем vatIn/vatOut из НДС Прогноз по кварталам
+      var _qIn = {}, _qOut = {};
+      vf.data.forEach(function(col) {
+        var key = col.y + '-' + _getQ(col.m);
+        _qIn[key]  = (_qIn[key]  || 0) + col.vatIn;
+        _qOut[key] = (_qOut[key] || 0) + col.vatOut;
+      });
+      var cqIn  = _qIn[curYear + '-' + curQ]    || 0;  // Q0: текущий квартал
+      var cqOut = _qOut[curYear + '-' + curQ]   || 0;
+      var nqIn  = _qIn[nextQY  + '-' + nextQ]   || 0;  // Q+1: следующий квартал
+      var nqOut = _qOut[nextQY + '-' + nextQ]   || 0;
+      // Распределяем Q0 по 1/3 в каждый месяц Q+1 внутри nextMonths
+      nextMonths.forEach(function(nm, i) {
+        if (i === 5) return;
+        if (_getQ(nm.month) === nextQ && nm.year === nextQY) {
+          vatInPlan[i]  = Math.round(cqIn  / 3);
+          vatOutPlan[i] = Math.round(cqOut / 3);
+        }
+      });
+      // Q+1 → "+дальше" (index 5) одной цифрой
+      vatInPlan[5]  = nqIn;
+      vatOutPlan[5] = nqOut;
+    }
     var vatInTot  = vatD.in_25  + vatD.in_26;
     var vatOutTot = vatD.out_25 + vatD.out_26;
     // Плановый остаток нарастающим итогом (нетто по НДС + финансовая деятельность)
@@ -1482,7 +1510,7 @@
       var offBrkPlan  = planResult.offBrkPlan;
       var finPlan     = planResult.finPlan;
       var vf = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo);
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan)
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + now.toLocaleDateString('ru-RU') + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
