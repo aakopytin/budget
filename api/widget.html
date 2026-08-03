@@ -830,24 +830,18 @@
     if (!vf) return '';
     var data = vf.data, dal = vf.dal, cols = vf.cols;
 
-    // ИТОГО ПЛАН = план от текущего квартала до конца − факт текущего квартала (все 4 строки)
+    // ИТОГО = сумма отображаемых значений по всем колонкам (включая далее)
     var itogoInc = 0, itogoVatIn = 0, itogoExp = 0, itogoVatOut = 0;
     data.forEach(function(c) {
-      itogoInc    += c.incPlan;
-      itogoVatIn  += c.vatInPlan;
-      itogoExp    += c.expPlan;
-      itogoVatOut += c.vatOutPlan;
+      itogoInc    += c.inc;
+      itogoVatIn  += c.vatIn;
+      itogoExp    += c.exp;
+      itogoVatOut += c.vatOut;
     });
-    itogoInc    += dal.incPlan;
-    itogoVatIn  += dal.vatInPlan;
-    itogoExp    += dal.expPlan;
-    itogoVatOut += dal.vatOutPlan;
-    for (var ci = 0; ci < 3; ci++) {
-      itogoInc    -= data[ci].incFact;
-      itogoVatIn  -= data[ci].vatInFact;
-      itogoExp    -= data[ci].expFact;
-      itogoVatOut -= data[ci].vatOutFact;
-    }
+    itogoInc    += dal.inc;
+    itogoVatIn  += dal.vatIn;
+    itogoExp    += dal.exp;
+    itogoVatOut += dal.vatOut;
     var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
 
     var MO = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
