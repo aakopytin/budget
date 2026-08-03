@@ -830,7 +830,7 @@
     if (!vf) return '';
     var data = vf.data, dal = vf.dal, cols = vf.cols;
 
-    // ИТОГО = сумма отображаемых значений по всем колонкам (включая далее)
+    // ИТОГО ПЛАН = сумма отображаемых значений по всем месяцам − факт за прошедшие и текущий
     var itogoInc = 0, itogoVatIn = 0, itogoExp = 0, itogoVatOut = 0;
     data.forEach(function(c) {
       itogoInc    += c.inc;
@@ -842,6 +842,14 @@
     itogoVatIn  += dal.vatIn;
     itogoExp    += dal.exp;
     itogoVatOut += dal.vatOut;
+    data.forEach(function(c) {
+      if (c.isPast || c.isCurrent) {
+        itogoInc    -= c.incFact;
+        itogoVatIn  -= c.vatInFact;
+        itogoExp    -= c.expFact;
+        itogoVatOut -= c.vatOutFact;
+      }
+    });
     var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
 
     var MO = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
