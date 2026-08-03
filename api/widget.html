@@ -754,10 +754,7 @@
       }
     });
 
-    // (debug-таблицы рендерятся в buildVatForecastTable)
     // ── Шаг 5: план — только ВСИП Бюджетный лимит (org_account_id=36) ────
-    var augYM = curYear * 100 + (curMonth === 12 ? 1 : curMonth + 1);
-    var augDebug = [];
     (planItems || []).forEach(function(item) {
       if (item.org_account_id !== 36) return;  // только ВСИП Бюджет (план)
       var dt = item.plan_paid_date || '';
@@ -770,10 +767,6 @@
       if (catName === 'Перевод между счетами (поступление)' ||
           catName === 'Перевод между счетами (списание)') return;
       if (LOAN_CATS[catName]) return;  // займы — финансовая деятельность, без НДС
-      if (pYM === augYM && isE) {
-        var t2 = getExpCatType(catName);
-        augDebug.push({cat: catName, type: t2, val: val, rate: effRates[t2] || 0, vat: Math.round(val*(effRates[t2]||0))});
-      }
       var tgt = null;
       if (pYM >= dalYM) {
         tgt = dal;
@@ -794,7 +787,6 @@
         tgt.vatOutPlan += Math.round(val * rOut);
       }
     });
-    console.log('[НДС-прогноз] Август — план расходов:', augDebug);
 
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
@@ -806,10 +798,8 @@
       } else if (col.isCurrent) {
         col.inc   = col.incPlan > 0 ? Math.max(col.incFact, col.incPlan) : col.incFact;
         col.vatIn = col.vatInPlan > 0 ? Math.max(col.vatInFact, col.vatInPlan) : col.vatInFact;
-        // Выплаты = expFact (весь isExpense, включая внебюджетный) + остаток только по бюджетным статьям
         var remBud  = Math.max(0, col.expPlan - col.expFactBud);
         col.exp     = col.expFact + remBud;
-        // НДС = фактический НДС (PLS 3144) + расчёт от остатка бюджета
         var remRate = col.expPlan > 0 ? col.vatOutPlan / col.expPlan : 0;
         col.vatOut  = col.vatOutFact + Math.round(remBud * remRate);
       } else {
@@ -991,52 +981,6 @@
       + rateRows
       + '</table></div>';
 
-    // ── Debug-таблица 1: факт по Q0-месяцам ──────────────────────────────
-    var dTS = 'padding:2px 6px;font-size:10px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap';
-    var dTSl = 'padding:2px 6px;font-size:10px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151';
-    var dTH = 'padding:2px 6px;font-size:10px;font-weight:600;color:#6b7280;border-bottom:1.5px solid #9ca3af;text-align:right;white-space:nowrap';
-    var dTHl = 'padding:2px 6px;font-size:10px;font-weight:600;color:#6b7280;border-bottom:1.5px solid #9ca3af;white-space:nowrap';
-    var MO2 = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
-    var q0labels = data.slice(0,3).map(function(c){ return MO2[c.m-1]+'\'' + String(c.y).slice(2); });
-    var debugFactTable = '<div style="margin-top:10px">'
-      + '<div style="font-size:11px;font-weight:600;color:#6b7280;padding:3px 6px 2px;border-bottom:1px solid #d1d5db;background:#f8f9fd">'
-      + 'DEBUG: факт текущего квартала (тыс. руб.)</div>'
-      + '<table style="border-collapse:collapse">'
-      + '<tr><th style="' + dTHl + '">Показатель</th>'
-      + q0labels.map(function(l){ return '<th style="' + dTH + '">' + l + '</th>'; }).join('')
-      + '<th style="' + dTH + '">Итого Q0</th></tr>'
-      + ['incFact','expFact','vatInFact','vatOutFact'].map(function(field) {
-          var labels = {incFact:'Поступления (incFact)', expFact:'Выплаты (expFact)', vatInFact:'НДС пост. (vatInFact)', vatOutFact:'НДС выпл. (vatOutFact)'};
-          var q0sum = 0;
-          var cells = data.slice(0,3).map(function(c) {
-            var v = Math.round((c[field]||0)/1000);
-            q0sum += v;
-            return '<td style="' + dTS + (v ? '' : ';color:#bbb') + '">' + (v ? new Intl.NumberFormat('ru-RU').format(v) : '—') + '</td>';
-          }).join('');
-          return '<tr><td style="' + dTSl + '">' + labels[field] + '</td>' + cells
-            + '<td style="' + dTS + ';font-weight:600;color:#1d4ed8">' + (q0sum ? new Intl.NumberFormat('ru-RU').format(q0sum) : '—') + '</td></tr>';
-        }).join('')
-      + '</table></div>';
-
-    // ── Debug-таблица 2: отклонённые категории поступлений ────────────────
-    var rejCats = vf.rejectedIncCats || {};
-    var rejKeys = Object.keys(rejCats).sort(function(a,b){ return rejCats[b]-rejCats[a]; });
-    var debugRejTable = '';
-    if (rejKeys.length > 0) {
-      debugRejTable = '<div style="margin-top:6px">'
-        + '<div style="font-size:11px;font-weight:600;color:#6b7280;padding:3px 6px 2px;border-bottom:1px solid #d1d5db;background:#fff7ed">'
-        + 'DEBUG: категории поступлений <span style="color:#dc2626">не попавшие</span> в incFact (тыс. руб.)</div>'
-        + '<table style="border-collapse:collapse">'
-        + '<tr><th style="' + dTHl + '">Категория</th><th style="' + dTH + '">Сумма</th></tr>'
-        + rejKeys.map(function(k) {
-            var v = Math.round(rejCats[k]/1000);
-            return '<tr><td style="' + dTSl + '">' + k + '</td><td style="' + dTS + ';color:#dc2626">' + new Intl.NumberFormat('ru-RU').format(v) + '</td></tr>';
-          }).join('')
-        + '</table></div>';
-    } else {
-      debugRejTable = '<div style="font-size:10px;color:#6b7280;padding:2px 6px;margin-top:4px">✓ Все поступления из ВСИП/ТТ-счетов попали в incFact (нет отклонённых категорий)</div>';
-    }
-
     return '<div style="margin-top:16px">'
       + '<div style="font-size:13px;font-weight:700;color:#374151;padding:3px 5px 2px;border-bottom:2px solid #9ca3af;background:#f8f9fd">'
       + 'НДС ПРОГНОЗ (тыс. руб.)</div>'
@@ -1049,8 +993,6 @@
       + resRow('Плановый результат (без НДС)')
       + '</table>'
       + rateTable
-      + debugFactTable
-      + debugRejTable
       + '</div>';
   }
 
