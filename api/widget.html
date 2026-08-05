@@ -1207,11 +1207,16 @@
         _qIn[key]  = (_qIn[key]  || 0) + col.vatIn;
         _qOut[key] = (_qOut[key] || 0) + col.vatOut;
       });
-      var cqIn  = _qIn[curYear + '-' + curQ]    || 0;  // Q0: текущий квартал
+      var cqIn  = _qIn[curYear + '-' + curQ]    || 0;  // Q0 НДС
       var cqOut = _qOut[curYear + '-' + curQ]   || 0;
-      var nqIn  = _qIn[nextQY  + '-' + nextQ]   || 0;  // Q+1: следующий квартал
+      var nqIn  = _qIn[nextQY  + '-' + nextQ]   || 0;  // Q+1 НДС
       var nqOut = _qOut[nextQY + '-' + nextQ]   || 0;
-      // Распределяем Q0 по 1/3 в каждый месяц Q+1 внутри nextMonths
+      var nnQ   = (nextQ % 4) + 1;
+      var nnQY  = (nextQ === 4) ? nextQY + 1 : nextQY;
+      var nnIn  = _qIn[nnQY  + '-' + nnQ]       || 0;  // Q+2 НДС (платёж в Q+3)
+      var nnOut = _qOut[nnQY + '-' + nnQ]       || 0;
+
+      // Q0 → Q+1: по 1/3 в каждый месяц Q+1
       nextMonths.forEach(function(nm, i) {
         if (i === 5) return;
         if (_getQ(nm.month) === nextQ && nm.year === nextQY) {
@@ -1219,9 +1224,21 @@
           vatOutPlan[i] = Math.round(cqOut / 3);
         }
       });
-      // Q+1 → "+дальше" (index 5) одной цифрой
-      vatInPlan[5]  = nqIn;
-      vatOutPlan[5] = nqOut;
+      // Q+1 → Q+2: по 1/3 в каждый месяц Q+2 (те что попадают в nextMonths[0..4])
+      var nqInPer  = Math.round(nqIn  / 3);
+      var nqOutPer = Math.round(nqOut / 3);
+      var q2Count  = 0;
+      nextMonths.forEach(function(nm, i) {
+        if (i === 5) return;
+        if (_getQ(nm.month) === nnQ && nm.year === nnQY) {
+          vatInPlan[i]  = nqInPer;
+          vatOutPlan[i] = nqOutPer;
+          q2Count++;
+        }
+      });
+      // "+далее": оставшиеся месяцы Q+2 (1/3 × оставшихся) + Q+2 НДС (→ Q+3, весь в "+далее")
+      vatInPlan[5]  = (3 - q2Count) * nqInPer  + nnIn;
+      vatOutPlan[5] = (3 - q2Count) * nqOutPer + nnOut;
     }
     var vatInTot  = vatD.in_25  + vatD.in_26;
     var vatOutTot = vatD.out_25 + vatD.out_26;
