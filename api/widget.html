@@ -220,6 +220,7 @@
 
   var OFF_SUBCATS = [
     {code:'zp',  label:'Зарплата'},
+    {code:'nzp', label:'Налоги с зарплаты'},
     {code:'km',  label:'Командировочные'},
     {code:'bk',  label:'Банковские комиссии'},
     {code:'lz',  label:'Лизинг'},
@@ -234,6 +235,8 @@
 
   function offSubcat(name) {
     var l = name.toLowerCase();
+    // "Налоги с зарплаты" содержит 'зарплат' — проверяем раньше, чем общий zp
+    if (l.indexOf('налог') >= 0 && (l.indexOf('зарплат') >= 0 || l.indexOf('фот') >= 0)) return 'nzp';
     if (l.indexOf('зарплат') >= 0 || l.indexOf('фот') >= 0 || l.indexOf('оплата труда') >= 0) return 'zp';
     if (l.indexOf('командир') >= 0) return 'km';
     if (l.indexOf('гарант') >= 0) return 'bg';
@@ -1156,12 +1159,16 @@
       planArr = planArr || [0,0,0,0,0,0];
       var hasPlan = hPlan > 0 || planArr.some(function(v) { return v > 0; });
       if (!tot && !fCur && !hasPlan) return '';
+      // Бюджет и Остаток — та же логика, что у остальных строк
+      var planSum = planArr.reduce(function(s, v) { return s + v; }, 0);
+      var b   = f25 + (f26 - fCur) + hPlan + planSum;
+      var ost = b - tot;
       return '<tr>'
         + TDl(label, ';padding-left:14px')
-        + TD(dash(), ';color:#9ca3af')
+        + TD(fmtK(b), ';color:#9ca3af')
         + TD(fmtK(f25), SEP) + TD(fmtK(f26))
         + TD(fmtK(tot, true))
-        + TD(dash())
+        + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
         + TD(fmtK(hPlan), SEP) + TD(fmtK(fCur))
         + planArr.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
         + '</tr>';
