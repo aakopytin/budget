@@ -472,6 +472,9 @@
       var isCur  = (yr === curYear && mo === curMonth);
       var fKey   = isPrev ? 'f25' : 'f26';
 
+      // Для текущего года: только транзакции до выбранной даты включительно
+      if (!isPrev && dt > today) return;
+
       // Финансовая деятельность — только проекты 24 и 26
       if (OXR_PIDS[tx.project_id]) {
         if ((typeName === 'Получение кредита' || typeName === 'Получение займа') && incAmt > 0) {
@@ -1034,9 +1037,11 @@
 
     function totals(type) {
       var t = { b:0, f25:0, f26:0, fCur:0, fH:0, plan:[0,0,0,0,0,0] };
+      var totalPlan = 0;
       PROJECTS.forEach(function(p) {
         var d = pm[p], a = acc[p];
         t.b    += getBudget(p, type);
+        totalPlan += (type === 'inc') ? d.bi_plan : d.be_plan;
         t.f25  += (type === 'inc') ? a.i25  : a.e25;
         t.f26  += (type === 'inc') ? a.i26  : a.e26;
         t.fCur += (type === 'inc') ? a.iCur : a.eCur;
@@ -1045,7 +1050,7 @@
           t.plan[i] += (type === 'inc') ? d.plan_i[i] : d.plan_e[i];
       });
       t.fact = t.f25 + t.f26;
-      t.ost  = t.b === 0 ? 0 : t.b - t.fact;
+      t.ost  = (t.b === 0 || !totalPlan) ? 0 : t.b - t.fact;
       return t;
     }
 
@@ -1057,7 +1062,8 @@
       var fCur = (type === 'inc') ? a.iCur : a.eCur;
       var h    = (type === 'inc') ? d.hI   : d.hE;
       var plan = (type === 'inc') ? d.plan_i : d.plan_e;
-      var fact = f25 + f26, ost = b === 0 ? 0 : b - fact;
+      var planPart = (type === 'inc') ? d.bi_plan : d.be_plan;
+      var fact = f25 + f26, ost = (b === 0 || !planPart) ? 0 : b - fact;
       if (!b && !fact && plan.every(function(x){ return !x; })) return '';
       return '<tr>'
         + TDl(p)
@@ -1103,7 +1109,7 @@
         var tot = brk.f25 + brk.f26;
         // Бюджет = факт_25 + (факт_26 - тек.мес) + план_от_тек.мес
         var b   = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
-        var ost = b === 0 ? 0 : b - tot;
+        var ost = (b === 0 || !obp || !obp.be_plan) ? 0 : b - tot;
         var hE  = obp ? obp.hE : 0;
         return '<tr>'
           + TDl('<span style="padding-left:14px">' + s.label + '</span>')
@@ -1121,7 +1127,7 @@
       var f25 = a ? a.e25 : 0, f26 = a ? a.e26 : 0, fCur = a ? a.eCur : 0;
       var b = getBudget(proj, 'exp');
       var plan = d ? d.plan_e : [0,0,0,0,0,0];
-      var fact = f25 + f26, ost = b === 0 ? 0 : b - fact;
+      var fact = f25 + f26, ost = (b === 0 || !d || !d.be_plan) ? 0 : b - fact;
       return sectionHdr('ОФИСНЫЕ РАСХОДЫ', '#f3f0ff', '#4c1d95', '#c4b5fd')
         + subRows
         + '<tr style="background:#ede9fe">'
@@ -1160,7 +1166,7 @@
       // Бюджет и Остаток — та же логика, что у остальных строк
       var planSum = planArr.reduce(function(s, v) { return s + v; }, 0);
       var b   = f25 + (f26 - fCur) + hPlan + planSum;
-      var ost = b === 0 ? 0 : b - tot;
+      var ost = (b === 0 || (!hPlan && !planSum)) ? 0 : b - tot;
       return '<tr>'
         + TDl(label, ';padding-left:14px')
         + TD(fmtK(b), ';color:#9ca3af')
