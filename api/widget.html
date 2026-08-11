@@ -1192,9 +1192,15 @@
     var fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]}, skOut:{hE:0,plan:[0,0,0,0,0,0]}};
     var finNetPlanCur = fp.skIn.hI - fp.skOut.hE;
     var finNetPlan    = fp.skIn.plan.map(function(v, i) { return v - fp.skOut.plan[i]; });
-    var finNetPlanSum = finNetPlan.reduce(function(s, v) { return s + v; }, 0);
-    var finNetB       = finNetF25 + (finNetF26 - finNetCur) + finNetPlanCur + finNetPlanSum;
-    var finNetOst     = (finNetB === 0 || (!finNetPlanCur && !finNetPlanSum)) ? 0 : finNetB - finNetTot;
+    // Бюджет и остаток — только по finLoanRow-строкам (у finRow нет плана → ост = 0)
+    var skInPlanSum   = fp.skIn.plan.reduce(function(s,v){ return s+v; }, 0);
+    var skInB         = fin.skIn.f25  + (fin.skIn.f26  - fin.skIn.fCur)  + fp.skIn.hI  + skInPlanSum;
+    var skInOst       = (skInB === 0  || (!fp.skIn.hI  && !skInPlanSum))  ? 0 : skInB  - (fin.skIn.f25  + fin.skIn.f26);
+    var skOutPlanSum  = fp.skOut.plan.reduce(function(s,v){ return s+v; }, 0);
+    var skOutB        = fin.skOut.f25 + (fin.skOut.f26 - fin.skOut.fCur) + fp.skOut.hE + skOutPlanSum;
+    var skOutOst      = (skOutB === 0 || (!fp.skOut.hE && !skOutPlanSum)) ? 0 : skOutB - (fin.skOut.f25 + fin.skOut.f26);
+    var finNetB       = skInB - skOutB;
+    var finNetOst     = skInOst - skOutOst;
 
     var ti = totals('inc'), te = totals('exp');
 
