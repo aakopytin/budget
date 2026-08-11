@@ -848,12 +848,68 @@
     });
     var vatAdj = vatAdjInc - vatAdjExp;  // положительное = чистый возврат НДС (снижает к уплате)
 
+    // Агрегаты Факт/ИТОГО по НДС — для сводной карточки
+    var vfFVI = 0, vfFVO = 0, vfTVI = 0, vfTVO = 0;
+    data.forEach(function(c) {
+      vfTVI += c.vatIn; vfTVO += c.vatOut;
+      if (c.isPast || c.isCurrent) { vfFVI += c.vatInFact; vfFVO += c.vatOutFact; }
+    });
+    vfTVI += dal.vatIn; vfTVO += dal.vatOut;
+    var vfFactVatRes  = vfFVI - vfFVO - vatAdj;   // >0 = к уплате, <0 = к возмещению
+    var vfItogoVatRes = vfTVI - vfTVO - vatAdj;
+
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
             pls3144count: pls3144count, pls3144trSum: pls3144trSum,
             pmMapKeys: pmMapKeys, effQLabel: effQLabel,
             rejectedIncCats: rejectedIncCats,
-            vatAdj: vatAdj};
+            vatAdj: vatAdj,
+            vfFactVatRes: vfFactVatRes,
+            vfItogoVatRes: vfItogoVatRes};
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // СВОДНАЯ КАРТОЧКА — прогноз движения денежных средств (над Сводным отчётом)
+  // ═══════════════════════════════════════════════════════════════════════════
+  function buildSummaryCard(sd) {
+    var K = 1000;
+    function fK(v) {
+      if (v === null || v === undefined) return '<span style="color:#9ca3af">—</span>';
+      var abs = Math.round(Math.abs(v) / K);
+      var s = abs.toLocaleString('ru-RU');
+      if (v === 0) return '<span style="color:#9ca3af">0</span>';
+      var clr = v < 0 ? '#dc2626' : '#15803d';
+      var sgn = v < 0 ? '−' : '+';
+      return '<span style="color:' + clr + ';font-weight:600">' + sgn + '&thinsp;' + s + '</span>';
+    }
+    function fKbal(v) {  // для остатка ДС: без знака, просто число
+      var abs = Math.round(Math.abs(v) / K);
+      var s = abs.toLocaleString('ru-RU');
+      var clr = v < 0 ? '#dc2626' : '#1d4ed8';
+      return '<span style="color:' + clr + ';font-weight:700">' + s + '</span>';
+    }
+    var CS = 'border-collapse:collapse;font-family:sans-serif;font-size:12px';
+    var row = function(label, valHtml, bg, bTop) {
+      var bgS  = bg   ? 'background:' + bg + ';' : '';
+      var btS  = bTop ? 'border-top:2px solid #9ca3af;' : 'border-top:1px solid #f0f0f0;';
+      return '<tr style="' + bgS + '">'
+        + '<td style="padding:5px 14px 5px 8px;' + btS + 'white-space:nowrap;color:#374151">' + label + '</td>'
+        + '<td style="padding:5px 8px;text-align:right;' + btS + 'white-space:nowrap">' + valHtml + '</td>'
+        + '</tr>';
+    };
+    var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan + sd.reserve;
+    return '<div style="margin-bottom:20px">'
+      + '<div style="font-size:10px;font-weight:700;color:#6b7280;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Прогноз движения денежных средств</div>'
+      + '<table style="' + CS + '">'
+      + row('Остаток денежных средств на ' + sd.dateStr, fKbal(sd.cashBalance), '', false)
+      + row('Ожидаемые приходы',      fK(sd.incOst),           '', false)
+      + row('Ожидаемые расходы',      fK(-sd.expOst),          '', false)
+      + row('Ожидаемые займы',        fK(sd.finOst),           '', false)
+      + row('Ожидаемый текущий НДС',  fK(sd.vatFact),          '', false)
+      + row('Ожидаемый плановый НДС', fK(sd.vatPlan),          '', false)
+      + row('Изменение резерва',      fK(sd.reserve),          '#fefce8', false)
+      + row('<strong>Планируемый доход</strong>', '<strong>' + fK(planned) + '</strong>', '#f0fdf4', true)
+      + '</table></div>';
   }
 
   function buildVatForecastTable(vf) {
@@ -1617,7 +1673,60 @@
       var offBrkPlan  = planResult.offBrkPlan;
       var finPlan     = planResult.finPlan;
       var vf = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, today);
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today)
+
+      // ── Сводная карточка: вычисление данных ─────────────────────────────
+      var _acc = factResult.acc;
+      var _fin = factResult.fin;
+
+      // Остаток бюджета по доходам/расходам (логика totals())
+      function _sumOst(type) {
+        var tot = 0;
+        PROJECTS.forEach(function(p) {
+          var d = pm[p], a = _acc[p];
+          var b = type === 'inc'
+            ? a.i25 + (a.i26 - a.iCur) + d.bi_plan
+            : a.e25 + (a.e26 - a.eCur) + d.be_plan;
+          var planPart = type === 'inc' ? d.bi_plan : d.be_plan;
+          var pFact = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
+          tot += (b === 0 || !planPart) ? 0 : b - pFact;
+        });
+        return tot;
+      }
+      var _incOst = _sumOst('inc');
+      var _expOst = _sumOst('exp');
+
+      // finNetOst (аналог buildTable)
+      var _fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]},skOut:{hE:0,plan:[0,0,0,0,0,0]}};
+      var _skInPS  = _fp.skIn.plan.reduce(function(s,v){return s+v;},0);
+      var _skInB   = _fin.skIn.f25  + (_fin.skIn.f26  - _fin.skIn.fCur)  + _fp.skIn.hI  + _skInPS;
+      var _skInO   = (_skInB  === 0 || (!_fp.skIn.hI  && !_skInPS))  ? 0 : _skInB  - (_fin.skIn.f25  + _fin.skIn.f26);
+      var _skOutPS = _fp.skOut.plan.reduce(function(s,v){return s+v;},0);
+      var _skOutB  = _fin.skOut.f25 + (_fin.skOut.f26 - _fin.skOut.fCur) + _fp.skOut.hE + _skOutPS;
+      var _skOutO  = (_skOutB === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutB - (_fin.skOut.f25 + _fin.skOut.f26);
+      var _finNetOst = _skInO - _skOutO;
+
+      // Изменение резерва: превышение факта тек.месяца над планом тек.месяца
+      var _rezInc = 0, _rezExp = 0;
+      PROJECTS.forEach(function(p) {
+        var a = _acc[p], d = pm[p];
+        _rezInc += Math.max(0, (a.iCur || 0) - (d.hI || 0));
+        _rezExp += Math.max(0, (a.eCur || 0) - (d.hE || 0));
+      });
+
+      var _sd = {
+        dateStr:     today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4),
+        cashBalance: factResult.vEnd + factResult.tEnd,
+        incOst:      _incOst,
+        expOst:      _expOst,
+        finOst:      _finNetOst,
+        vatFact:     -(vf.vfFactVatRes  || 0),  // >0 к возмещению (+), <0 к уплате (-)
+        vatPlan:     -(vf.vfItogoVatRes || 0),
+        reserve:     _rezInc - _rezExp
+      };
+      // ────────────────────────────────────────────────────────────────────
+
+      contentEl.innerHTML = buildSummaryCard(_sd)
+        + buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
