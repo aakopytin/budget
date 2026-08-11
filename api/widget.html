@@ -829,11 +829,31 @@
     var pls3144tr     = pls3144all.filter(function(p){return p.project_id===TR_PID;});
     var pls3144trSum  = pls3144tr.reduce(function(s,p){return s+(parseFloat(p.outcome)||0);},0);
     var pmMapKeys     = Object.keys(planMoneyTypeMap).length;
+
+    // Корректировка НДС: project_id=36 (Проект Корректировки НДС), org_account_id=149, текущий квартал
+    // type=30 (доход = возврат НДС), type=40 (расход = НДС к уплате)
+    var vatAdjInc = 0, vatAdjExp = 0;
+    var qEndM = q0m + 2, qEndY = curYear;
+    while (qEndM > 12) { qEndM -= 12; qEndY++; }
+    var qStartYM = curYear * 100 + q0m;
+    var qEndYM   = qEndY  * 100 + qEndM;
+    (planItems || []).forEach(function(item) {
+      if (item.project_id !== 36) return;
+      var dt = item.plan_paid_date || '';
+      if (dt.length < 7) return;
+      var pYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
+      if (pYM < qStartYM || pYM > qEndYM) return;
+      if (item.type === 30) vatAdjInc += parseFloat(item.total) || 0;
+      if (item.type === 40) vatAdjExp += parseFloat(item.total) || 0;
+    });
+    var vatAdj = vatAdjInc - vatAdjExp;  // положительное = чистый возврат НДС (снижает к уплате)
+
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
             pls3144count: pls3144count, pls3144trSum: pls3144trSum,
             pmMapKeys: pmMapKeys, effQLabel: effQLabel,
-            rejectedIncCats: rejectedIncCats};
+            rejectedIncCats: rejectedIncCats,
+            vatAdj: vatAdj};
   }
 
   function buildVatForecastTable(vf) {
@@ -972,8 +992,8 @@
       return row;
     }
 
-    // Строка Корректировка НДС (всегда 0, placeholder для ручной корректировки)
-    function adjRow(label) {
+    // Строка Корректировка НДС: в Факт — нетто результат из Проекта Корректировки НДС (project_id=36)
+    function adjRow(label, factVal) {
       var brdT = 'border-top:1px solid #e5e7eb';
       var row = '<tr style="background:#fefce8">';
       row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:normal;width:90px;max-width:90px;color:#92400e"><strong>' + label + '</strong></td>';
@@ -982,9 +1002,11 @@
         row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + bl + '"><span style="color:#ccc">—</span></td>';
       }
       row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + '"><span style="color:#ccc">—</span></td>';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + ';background:#f3f4f6"><span style="color:#ccc">—</span></td>';
+      var fClr = factVal > 0 ? '#15803d' : factVal < 0 ? '#dc2626' : '#6b7280';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';background:#f3f4f6;color:' + fClr + '">' + fv(factVal) + '</td>';
       row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + '"><span style="color:#ccc">—</span></td>';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + '"><span style="color:#ccc">—</span></td>';
+      var iClr = factVal > 0 ? '#15803d' : factVal < 0 ? '#dc2626' : '#6b7280';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';color:' + iClr + '">' + fv(factVal) + '</td>';
       row += '</tr>';
       return row;
     }
@@ -1028,9 +1050,10 @@
       + rateRows
       + '</table></div>';
 
-    var factVatRes  = factVatIn  - factVatOut;
+    var vatAdj      = vf.vatAdj || 0;  // нетто Корректировка НДС (project_id=36, текущий квартал)
+    var factVatRes  = factVatIn  - factVatOut - vatAdj;
     var progVatRes  = progVatIn  - progVatOut;
-    var itogoVatRes = itogoVatIn - itogoVatOut;
+    var itogoVatRes = itogoVatIn - itogoVatOut - vatAdj;
     var factRes     = (factInc  - factVatIn)  - (factExp  - factVatOut);
     var progRes     = (progInc  - progVatIn)  - (progExp  - progVatOut);
     var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
@@ -1046,7 +1069,7 @@
       + dataRow('НДС с выплат',      function(c){return c.vatOut;}, '#92400e', factVatOut, progVatOut, itogoVatOut)
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
-      + adjRow('Корректировка НДС')
+      + adjRow('Корректировка НДС', vatAdj)
       + resRow('ИТОГО НДС', function(c){return c.vatIn - c.vatOut;},
                factVatRes, progVatRes, itogoVatRes, '#eff6ff')
       + '</table>'
