@@ -1011,6 +1011,36 @@
       return row;
     }
 
+    // Строки ИТОГО НДС к получению / к уплате (одна и та же формула, фильтрация по знаку)
+    function vatSplitRow(label, fnV, factV, progV, itogoV, bg, isPositive, first) {
+      var brdT = first ? 'border-top:2px solid #9ca3af' : 'border-top:1px solid #bfdbfe';
+      var rowBg = bg || '#eff6ff';
+      var dash = '<span style="color:#ccc">—</span>';
+      var cellStyle = function(extra) {
+        return 'padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + (extra || '');
+      };
+      var colorFor = function(v) { return v > 0 ? '#15803d' : v < 0 ? '#dc2626' : '#6b7280'; };
+      var showIf   = function(v) { return isPositive ? v > 0 : v < 0; };
+      var cellVal  = function(v, extra) {
+        if (showIf(v)) return '<td style="' + cellStyle(extra) + ';color:' + colorFor(v) + '">' + fv(v) + '</td>';
+        return '<td style="' + cellStyle(extra) + '">' + dash + '</td>';
+      };
+      var row = '<tr style="background:' + rowBg + '">';
+      row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:normal;width:90px;max-width:90px"><strong style="color:#374151">' + label + '</strong></td>';
+      data.forEach(function(c, ci) {
+        var bl = (ci % 3 === 0) ? ';' + BL : '';
+        var v = fnV(c);
+        var cbg = colBg(c) ? ';' + colBg(c) : '';
+        row += cellVal(v, bl + cbg);
+      });
+      row += cellVal(fnV(dal), ';' + BL);
+      row += cellVal(factV, ';' + BL + ';background:#f3f4f6');
+      row += cellVal(progV, ';' + BL);
+      row += cellVal(itogoV, ';' + BL);
+      row += '</tr>';
+      return row;
+    }
+
     // Таблица эффективных ставок
     var TYPES_LABELS = {smr:'СМР', mat:'Материалы', design:'Проектирование/Изыскание', ar:'Аренда', lz:'Лизинг', buh:'Бухгалтерия', proj_other:'Прочие проектные', bg:'Банк. гарантии', zero:'Без НДС'};
     var DEFAULT_EFF_RATES_REF = {smr:22/122, mat:22/122, design:22/122, bg:0, ar:22/122, lz:22/122, buh:0, proj_other:22/122, zero:0};
@@ -1070,8 +1100,10 @@
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
       + adjRow('Корректировка НДС', vatAdj)
-      + resRow('ИТОГО НДС', function(c){return c.vatIn - c.vatOut;},
-               factVatRes, progVatRes, itogoVatRes, '#eff6ff')
+      + vatSplitRow('Итого НДС к получению', function(c){return c.vatIn - c.vatOut;},
+                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, true)
+      + vatSplitRow('Итого НДС к уплате',    function(c){return c.vatIn - c.vatOut;},
+                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  false)
       + '</table>'
       + rateTable
       + '</div>';
