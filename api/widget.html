@@ -989,6 +989,15 @@
       + '</tr>';
 
     // Строка 2 заголовка: месяцы
+    // Периоды для заголовков Факт / Прогноз
+    var _curM = vf.curYM % 100, _curY = Math.floor(vf.curYM / 100);
+    var _factFirst = MO[vf.q0m - 1] + '\'' + String(_curY).slice(2);
+    var _factLast  = MO[_curM - 1]  + '\'' + String(_curY).slice(2);
+    var _factPeriod = (vf.q0m === _curM) ? _factFirst : _factFirst + '–' + _factLast;
+    var _progFirstM = _curM + 1, _progFirstY = _curY;
+    if (_progFirstM > 12) { _progFirstM -= 12; _progFirstY++; }
+    var _progPeriod = MO[_progFirstM - 1] + '\'' + String(_progFirstY).slice(2) + '–' + dalLabel;
+
     var h2 = '<tr><th style="' + HSl + '">тыс. руб.</th>';
     cols.forEach(function(c, ci) {
       var bg = data[ci].isPast ? 'background:#e5e7eb' : data[ci].isCurrent ? 'background:#dbeafe' : 'background:#f8f9fd';
@@ -996,8 +1005,8 @@
       h2 += '<th style="' + HS + ';' + bg + bl + '">' + mlbl(c) + '</th>';
     });
     h2 += '<th style="' + HS + ';' + BL + '">' + dalLabel + '</th>';
-    h2 += '<th style="' + HS + ';' + BL + ';background:#f3f4f6">Факт</th>';
-    h2 += '<th style="' + HS + ';' + BL + '">Прогноз</th>';
+    h2 += '<th style="' + HS + ';' + BL + ';background:#f3f4f6">' + _factPeriod + '</th>';
+    h2 += '<th style="' + HS + ';' + BL + '">' + _progPeriod + '</th>';
     h2 += '<th style="' + HS + ';' + BL + ';color:#1d4ed8">ИТОГО</th>';
     h2 += '</tr>';
 
@@ -1166,7 +1175,7 @@
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
@@ -1513,6 +1522,45 @@
       + '</thead>'
       + '<tbody>'
 
+      // ── ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ ────────────────────────────────
+      + (function() {
+        if (!sd) return '';
+        function sdFmt(v) {
+          if (v === 0) return '<span style="color:#9ca3af">0</span>';
+          var abs = Math.round(Math.abs(v) / 1000);
+          var s = abs.toLocaleString('ru-RU');
+          var clr = v < 0 ? '#dc2626' : '#15803d';
+          var sgn = v < 0 ? '− ' : '+ ';
+          return '<span style="color:' + clr + ';font-weight:600">' + sgn + s + '</span>';
+        }
+        var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan + sd.reserve;
+        var LS = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb';
+        var VS = 'padding:3px 6px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #e5e7eb';
+        var ES = 'border-bottom:1px solid #e5e7eb';
+        function sdRow(lbl, valHtml, bg) {
+          return '<tr' + (bg ? ' style="background:' + bg + '"' : '') + '>'
+            + '<td colspan="3" style="' + LS + (bg ? ';background:' + bg : '') + '">' + lbl + '</td>'
+            + '<td style="' + VS + (bg ? ';background:' + bg : '') + '">' + valHtml + '</td>'
+            + '<td colspan="10" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>'
+            + '</tr>';
+        }
+        return '<tr style="background:#1e3a5f">'
+          + '<td colspan="14" style="padding:3px 6px;font-size:9px;font-weight:700;color:#a8c4e0;letter-spacing:0.08em;text-transform:uppercase">ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ · тыс. руб.</td>'
+          + '</tr>'
+          + sdRow('Остаток ДС на ' + sd.dateStr, fmtBal(sd.cashBalance, false))
+          + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst))
+          + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst))
+          + sdRow('Ожидаемые займы',        sdFmt(sd.finOst))
+          + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact))
+          + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan))
+          + sdRow('Изменение резерва',      sdFmt(sd.reserve), '#fefce8')
+          + '<tr style="background:#f0fdf4">'
+          + '<td colspan="3" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:2px solid #c5cfe8">Планируемый доход</td>'
+          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:2px solid #c5cfe8">' + sdFmt(planned) + '</td>'
+          + '<td colspan="10" style="border-top:2px solid #9ca3af;border-bottom:2px solid #c5cfe8"></td>'
+          + '</tr>';
+      })()
+
       // Начальный остаток на 01.01
       + balOpenRow('ВСИП', vSt, false)
       + balOpenRow('ТТ', tSt, false)
@@ -1719,14 +1767,13 @@
         incOst:      _incOst,
         expOst:      _expOst,
         finOst:      _finNetOst,
-        vatFact:     -(vf.vfFactVatRes  || 0),  // >0 к возмещению (+), <0 к уплате (-)
-        vatPlan:     -(vf.vfItogoVatRes || 0),
+        vatFact:     -(vf.vfFactVatRes  || 0),           // >0 к возмещению (+), <0 к уплате (-)
+        vatPlan:     -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0)),  // Прогноз = ИТОГО − Факт
         reserve:     _rezInc - _rezExp
       };
       // ────────────────────────────────────────────────────────────────────
 
-      contentEl.innerHTML = buildSummaryCard(_sd)
-        + buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today)
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
