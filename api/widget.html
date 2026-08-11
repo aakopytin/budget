@@ -808,10 +808,10 @@
       } else if (col.isCurrent) {
         col.inc   = col.incPlan > 0 ? Math.max(col.incFact, col.incPlan) : col.incFact;
         col.vatIn = col.vatInPlan > 0 ? Math.max(col.vatInFact, col.vatInPlan) : col.vatInFact;
-        var remBud  = Math.max(0, col.expPlan - col.expFactBud);
-        col.exp     = col.expFact + remBud;
+        var remExp  = Math.max(0, col.expPlan - col.expFact);  // остаток плана по всем фактическим (как в верхней таблице)
+        col.exp     = col.expFact + remExp;
         var remRate = col.expPlan > 0 ? col.vatOutPlan / col.expPlan : 0;
-        col.vatOut  = col.vatOutFact + Math.round(remBud * remRate);
+        col.vatOut  = col.vatOutFact + Math.round(remExp * remRate);
       } else {
         col.inc    = col.incPlan;
         col.exp    = col.expPlan;
