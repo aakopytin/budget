@@ -1192,6 +1192,9 @@
     var fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]}, skOut:{hE:0,plan:[0,0,0,0,0,0]}};
     var finNetPlanCur = fp.skIn.hI - fp.skOut.hE;
     var finNetPlan    = fp.skIn.plan.map(function(v, i) { return v - fp.skOut.plan[i]; });
+    var finNetPlanSum = finNetPlan.reduce(function(s, v) { return s + v; }, 0);
+    var finNetB       = finNetF25 + (finNetF26 - finNetCur) + finNetPlanCur + finNetPlanSum;
+    var finNetOst     = (finNetB === 0 || (!finNetPlanCur && !finNetPlanSum)) ? 0 : finNetB - finNetTot;
 
     var ti = totals('inc'), te = totals('exp');
 
@@ -1405,10 +1408,10 @@
       + finRow('Переводы между счетами', trNet)
       + '<tr style="background:#e0e7ff">'
       + TDl('<strong>ИТОГО финансовая деятельность</strong>', BT)
-      + TD(dash(), ';color:#9ca3af' + BT)
+      + TD(fmtK(finNetB, true), ';color:#9ca3af' + BT)
       + TD(fmtK(finNetF25, true), SEP + BT) + TD(fmtK(finNetF26, true), BT)
       + TD(fmtK(finNetTot, true), BT)
-      + TD(dash(), BT)
+      + TD(fmtK(finNetOst, true, true), (finNetOst < 0 ? ';color:#dc2626' : '') + BT)
       + TD(fmtK(finNetPlanCur, true), SEP + BT) + TD(fmtK(finNetCur, true), BT)
       + finNetPlan.map(function(v, i) { return TD(fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
       + '</tr>'
