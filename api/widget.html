@@ -1037,20 +1037,25 @@
 
     function totals(type) {
       var t = { b:0, f25:0, f26:0, fCur:0, fH:0, plan:[0,0,0,0,0,0] };
-      var totalPlan = 0;
+      var totalOst = 0;
       PROJECTS.forEach(function(p) {
         var d = pm[p], a = acc[p];
-        t.b    += getBudget(p, type);
-        totalPlan += (type === 'inc') ? d.bi_plan : d.be_plan;
-        t.f25  += (type === 'inc') ? a.i25  : a.e25;
-        t.f26  += (type === 'inc') ? a.i26  : a.e26;
+        var b        = getBudget(p, type);
+        var planPart = (type === 'inc') ? d.bi_plan : d.be_plan;
+        var pf25     = (type === 'inc') ? a.i25  : a.e25;
+        var pf26     = (type === 'inc') ? a.i26  : a.e26;
+        var pFact    = pf25 + pf26;
+        totalOst += (b === 0 || !planPart) ? 0 : b - pFact;
+        t.b    += b;
+        t.f25  += pf25;
+        t.f26  += pf26;
         t.fCur += (type === 'inc') ? a.iCur : a.eCur;
         t.fH   += (type === 'inc') ? d.hI   : d.hE;
         for (var i = 0; i < 6; i++)
           t.plan[i] += (type === 'inc') ? d.plan_i[i] : d.plan_e[i];
       });
       t.fact = t.f25 + t.f26;
-      t.ost  = (t.b === 0 || !totalPlan) ? 0 : t.b - t.fact;
+      t.ost  = totalOst;
       return t;
     }
 
