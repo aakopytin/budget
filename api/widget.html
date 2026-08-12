@@ -906,7 +906,7 @@
         + '<td style="padding:5px 8px;text-align:right;' + btS + 'white-space:nowrap">' + valHtml + '</td>'
         + '</tr>';
     };
-    var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan + sd.reserve;
+    var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan - sd.reserve;
     return '<div style="margin-bottom:20px">'
       + '<div style="font-size:10px;font-weight:700;color:#6b7280;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Прогноз движения денежных средств</div>'
       + '<table style="' + CS + '">'
@@ -1542,7 +1542,7 @@
           var sgn = v < 0 ? '− ' : '+ ';
           return '<span style="color:' + clr + ';font-weight:600">' + sgn + s + '</span>';
         }
-        var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan + sd.reserve;
+        var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan - sd.reserve;
         var LS = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb';
         var VS = 'padding:3px 6px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #e5e7eb';
         var ES = 'border-bottom:1px solid #e5e7eb';
