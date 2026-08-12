@@ -393,7 +393,7 @@
         // 3144 = НДС к вычету (input VAT, outcome) — единственная категория в transaction_pls
         // category_id=1000 (НДС начисленный) в transaction_pls не существует
         return (iy === curYear || iy === prevYear)
-            && (i.category_id === 3144 || i.category_id === 3147 || i.category_id === 3158);
+            && (i.category_id === 3144 || i.category_id === 3147 || i.category_id === 1000);
       });
     });
   }
@@ -740,15 +740,17 @@
       }
     });
 
-    // ── Шаг 4a: vatInFact из PLS 3158 (OUTPUT_VAT, НДС начисленный с поступлений)
+    // ── Шаг 4a: vatInFact из PLS category_id=3147 (Налог - НДС, income)
+    // Клиентские транзакции (project_id ≠ TR_PID=27) — НДС хранится в PLS отдельной строкой.
     (plsItems || []).forEach(function(p) {
-      if (p.category_id !== 3158) return;
+      if (p.category_id !== 3147) return;
+      if (p.project_id === TR_PID) return;  // исключаем внутренние переводы ВСИП↔ТТ
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
+          if (data[ci].isCurrent && today && dt > today) break;
           data[ci].vatInFact += parseFloat(p.income) || 0;
           break;
         }
