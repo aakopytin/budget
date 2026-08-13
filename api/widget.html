@@ -621,11 +621,13 @@
     // ── Шаг 1: вычисляем эффективные ставки по категориям из фактических PLS ─
     var TR_PID = 27;  // project_id переводов ВСИП↔ТТ, как в nds.html
 
-    // Период для расчёта ставок = весь текущий год (curYear).
-    var effQYear  = curYear;
-    var effQStartM = 1;
-    var effQEndM   = 12;
-    var effQLabel  = String(curYear);
+    // Период для расчёта ставок = все завершённые кварталы curYear (Янв–конец предыдущего квартала).
+    var prevQEndM = q0m - 1, prevQEndY = curYear;
+    if (prevQEndM <= 0) { prevQEndM += 12; prevQEndY--; }
+    var prevQStartYM = curYear * 100 + 1;           // Янв curYear
+    var prevQEndYM   = prevQEndY * 100 + prevQEndM;
+    var MO_EFF = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+    var effQLabel = 'Янв–' + MO_EFF[prevQEndM-1] + '\'' + String(prevQEndY).slice(2);
 
     // Карта plan_money.id → catType.
     // PLS-запись содержит plan_money_id — прямую FK на план. У плана есть category_id.
@@ -642,8 +644,10 @@
     txns.forEach(function(tx) {
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
-      var txYear = tx.date ? parseInt(tx.date.substring(0, 4)) : 0;
-      if (txYear !== effQYear) return;
+      var txDate = tx.date || '';
+      if (txDate.length < 7) return;
+      var txYM = parseInt(txDate.slice(0,4)) * 100 + parseInt(txDate.slice(5,7));
+      if (txYM < prevQStartYM || txYM > prevQEndYM) return;
       var catName = catMap[tx.category_id] || '';
       var expAmt = parseFloat(tx.outcome) || 0;
       if (!expAmt) return;
@@ -657,8 +661,10 @@
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
       if (p.project_id === TR_PID) return;
-      var pYear = p.date ? parseInt(p.date.substring(0, 4)) : 0;
-      if (pYear !== effQYear) return;
+      var pEffDate = p.date || '';
+      if (pEffDate.length < 7) return;
+      var pEffYM = parseInt(pEffDate.slice(0,4)) * 100 + parseInt(pEffDate.slice(5,7));
+      if (pEffYM < prevQStartYM || pEffYM > prevQEndYM) return;
       var vatAmt = parseFloat(p.outcome) || 0;
       if (!vatAmt) return;
       var t = planMoneyTypeMap[p.plan_money_id];
