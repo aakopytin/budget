@@ -1518,29 +1518,8 @@
 
     return '<table style="width:100%;border-collapse:collapse;font-size:11px">'
       + '<thead>'
-      + '<tr style="background:#1e3a5f;color:#a8c4e0;font-size:9px">'
-      + '<td style="padding:2px 6px;min-width:120px"></td><td></td>'
-      + '<td colspan="4" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">ФАКТ</td>'
-      + '<td colspan="2" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">Тек. месяц (' + curMon + ')</td>'
-      + '<td colspan="6" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">&#9654; План</td>'
-      + '</tr>'
-      + '<tr style="background:#1e3a5f;color:#fff">'
-      + THl('Проект', ';width:1%')
-      + TH('Бюджет', ';color:#a8c4e0')
-      + TH(String(prevYear), SEP + ';color:#a8c4e0')
-      + TH(yearLabel)
-      + TH('Итого') + TH('Остаток')
-      + TH('Бюджет', SEP) + TH('Факт')
-      + nextMonths.map(function(nm, i) {
-          var lbl = MS[nm.month-1] + (nm.year !== curYear ? ' \'' + String(nm.year).slice(2) : '');
-          if (i === 5) lbl += '+далее';
-          return TH(lbl, i === 0 ? SEP : '');
-        }).join('')
-      + '</tr>'
-      + '</thead>'
-      + '<tbody>'
-
       // ── ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ ────────────────────────────────
+
       + (function() {
         if (!sd) return '';
         function sdFmt(v) {
@@ -1573,12 +1552,33 @@
           + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan))
           + sdRow('Изменение резерва',      sdFmt(sd.reserve), '#fefce8')
           + '<tr style="background:#f0fdf4">'
-          + '<td colspan="3" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:2px solid #c5cfe8">Планируемый доход</td>'
-          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:2px solid #c5cfe8">' + sdFmt(planned) + '</td>'
-          + '<td colspan="10" style="border-top:2px solid #9ca3af;border-bottom:2px solid #c5cfe8"></td>'
+          + '<td colspan="3" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
+          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">' + sdFmt(planned) + '</td>'
+          + '<td colspan="10" style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"></td>'
           + '</tr>'
-          + '<tr><td colspan="14" style="height:14px;background:#f8fafc;border-bottom:3px solid #3d5c7a"></td></tr>';
       })()
+
+      + '<tr style="background:#1e3a5f;color:#a8c4e0;font-size:9px">'
+      + '<td style="padding:2px 6px;min-width:120px"></td><td></td>'
+      + '<td colspan="4" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">ФАКТ</td>'
+      + '<td colspan="2" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">Тек. месяц (' + curMon + ')</td>'
+      + '<td colspan="6" style="padding:2px 6px;text-align:center;border-left:2px solid #3d5c7a">&#9654; План</td>'
+      + '</tr>'
+      + '<tr style="background:#1e3a5f;color:#fff">'
+      + THl('Проект', ';width:1%')
+      + TH('Бюджет', ';color:#a8c4e0')
+      + TH(String(prevYear), SEP + ';color:#a8c4e0')
+      + TH(yearLabel)
+      + TH('Итого') + TH('Остаток')
+      + TH('Бюджет', SEP) + TH('Факт')
+      + nextMonths.map(function(nm, i) {
+          var lbl = MS[nm.month-1] + (nm.year !== curYear ? ' \'' + String(nm.year).slice(2) : '');
+          if (i === 5) lbl += '+далее';
+          return TH(lbl, i === 0 ? SEP : '');
+        }).join('')
+      + '</tr>'
+      + '</thead>'
+      + '<tbody>'
 
       // Начальный остаток на 01.01
       + balOpenRow('ВСИП', vSt, false)
