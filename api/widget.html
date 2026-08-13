@@ -1804,7 +1804,7 @@
 
       // Вчерашние данные для колонки сравнения
       var _todayPrev = (function(){
-        var d = new Date(today); d.setDate(d.getDate() - 1);
+        var d = new Date(today); d.setDate(d.getDate() - 2);
         return d.toISOString().slice(0,10);
       })();
       var _frP = calcFact(txns, catMap, yr, mo, _todayPrev);
