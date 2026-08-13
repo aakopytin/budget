@@ -1193,7 +1193,7 @@
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd, sdPrev) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
@@ -1531,31 +1531,42 @@
           return '<span style="color:' + clr + ';font-weight:600">' + sgn + s + '</span>';
         }
         var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan - sd.reserve;
-        var LS = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb';
-        var VS = 'padding:3px 6px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #e5e7eb';
-        var ES = 'border-bottom:1px solid #e5e7eb';
-        function sdRow(lbl, valHtml, bg) {
+        var plannedPrev = sdPrev ? sdPrev.cashBalance + sdPrev.incOst - sdPrev.expOst + sdPrev.finOst + sdPrev.vatFact + sdPrev.vatPlan - sdPrev.reserve : null;
+        var LS  = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb';
+        var VS  = 'padding:3px 6px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #e5e7eb';
+        var VSP = VS + ';color:#6b7280';
+        var ES  = 'border-bottom:1px solid #e5e7eb';
+        function sdRow(lbl, valHtml, valPrevHtml, bg) {
           return '<tr' + (bg ? ' style="background:' + bg + '"' : '') + '>'
-            + '<td colspan="3" style="' + LS + (bg ? ';background:' + bg : '') + '">' + lbl + '</td>'
-            + '<td style="' + VS + (bg ? ';background:' + bg : '') + '">' + valHtml + '</td>'
+            + '<td colspan="2" style="' + LS + (bg ? ';background:' + bg : '') + '">' + lbl + '</td>'
+            + '<td style="' + VS  + (bg ? ';background:' + bg : '') + '">' + valHtml + '</td>'
+            + '<td style="' + VSP + (bg ? ';background:' + bg : '') + '">' + (valPrevHtml || '') + '</td>'
             + '<td colspan="10" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>'
             + '</tr>';
         }
         return '<tr style="background:#1e3a5f">'
           + '<td colspan="14" style="padding:3px 6px;font-size:9px;font-weight:700;color:#a8c4e0;letter-spacing:0.08em;text-transform:uppercase">ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ · тыс. руб.</td>'
           + '</tr>'
-          + sdRow('Остаток ДС на ' + sd.dateStr, fmtBal(sd.cashBalance, false))
-          + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst))
-          + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst))
-          + sdRow('Ожидаемые займы',        sdFmt(sd.finOst))
-          + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact))
-          + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan))
-          + sdRow('Изменение резерва',      sdFmt(sd.reserve), '#fefce8')
+          + '<tr style="background:#1e3a5f">'
+          + '<td colspan="2" style="border-bottom:1px solid #2d4f7c"></td>'
+          + '<td style="padding:2px 6px;text-align:right;font-size:9px;color:#a8c4e0;white-space:nowrap;border-bottom:1px solid #2d4f7c">' + sd.dateStr + '</td>'
+          + '<td style="padding:2px 6px;text-align:right;font-size:9px;color:#6b8ba4;white-space:nowrap;border-bottom:1px solid #2d4f7c">' + (sdPrev ? sdPrev.dateStr : '') + '</td>'
+          + '<td colspan="10" style="border-bottom:1px solid #2d4f7c"></td>'
+          + '</tr>'
+          + sdRow('Остаток ДС', fmtBal(sd.cashBalance, false), sdPrev ? fmtBal(sdPrev.cashBalance, false) : null)
+          + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst),    sdPrev ? sdFmt(sdPrev.incOst)    : null)
+          + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst),   sdPrev ? sdFmt(-sdPrev.expOst)   : null)
+          + sdRow('Ожидаемые займы',        sdFmt(sd.finOst),    sdPrev ? sdFmt(sdPrev.finOst)    : null)
+          + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null)
+          + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null)
+          + sdRow('Изменение резерва',      sdFmt(sd.reserve),   sdPrev ? sdFmt(sdPrev.reserve)   : null, '#fefce8')
           + '<tr style="background:#f0fdf4">'
-          + '<td colspan="3" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
+          + '<td colspan="2" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
           + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">' + sdFmt(planned) + '</td>'
+          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;color:#6b7280">' + (plannedPrev !== null ? sdFmt(plannedPrev) : '') + '</td>'
           + '<td colspan="10" style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"></td>'
           + '</tr>'
+          + '<tr><td colspan="14" style="height:8px;background:#e8edf3;border-bottom:3px solid #1e3a5f"></td></tr>'
       })()
 
       + '<tr style="background:#1e3a5f;color:#a8c4e0;font-size:9px">'
@@ -1790,9 +1801,49 @@
         vatPlan:     -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0)),  // Прогноз = ИТОГО − Факт
         reserve:     _rezInc - _rezExp
       };
+
+      // Вчерашние данные для колонки сравнения
+      var _todayPrev = (function(){
+        var d = new Date(today); d.setDate(d.getDate() - 1);
+        return d.toISOString().slice(0,10);
+      })();
+      var _frP = calcFact(txns, catMap, yr, mo, _todayPrev);
+      var _vfP = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, _todayPrev);
+      var _aP  = _frP.acc, _fnP = _frP.fin;
+      function _sumOstP(type) {
+        var tot = 0;
+        PROJECTS.forEach(function(p) {
+          var d = pm[p], a = _aP[p];
+          var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
+          var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
+          var pl = type === 'inc' ? d.bi_plan : d.be_plan;
+          tot += (b === 0 || !pl) ? 0 : b - pf;
+        });
+        return tot;
+      }
+      var _skInBP  = _fnP.skIn.f25  + (_fnP.skIn.f26  - _fnP.skIn.fCur)  + _fp.skIn.hI  + _skInPS;
+      var _skInOP  = (_skInBP  === 0 || (!_fp.skIn.hI  && !_skInPS))  ? 0 : _skInBP  - (_fnP.skIn.f25  + _fnP.skIn.f26);
+      var _skOutBP = _fnP.skOut.f25 + (_fnP.skOut.f26 - _fnP.skOut.fCur) + _fp.skOut.hE + _skOutPS;
+      var _skOutOP = (_skOutBP === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutBP - (_fnP.skOut.f25 + _fnP.skOut.f26);
+      var _rezIncP = 0, _rezExpP = 0;
+      PROJECTS.forEach(function(p) {
+        var a = _aP[p], d = pm[p];
+        _rezIncP += Math.max(0, (a.iCur || 0) - (d.hI || 0));
+        _rezExpP += Math.max(0, (a.eCur || 0) - (d.hE || 0));
+      });
+      var _sdPrev = {
+        dateStr:     _todayPrev.slice(8,10) + '.' + _todayPrev.slice(5,7) + '.' + _todayPrev.slice(0,4),
+        cashBalance: _frP.vEnd + _frP.tEnd,
+        incOst:      _sumOstP('inc'),
+        expOst:      _sumOstP('exp'),
+        finOst:      _skInOP - _skOutOP,
+        vatFact:     -(_vfP.vfFactVatRes  || 0),
+        vatPlan:     -((_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0)),
+        reserve:     _rezIncP - _rezExpP
+      };
       // ────────────────────────────────────────────────────────────────────
 
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd)
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
