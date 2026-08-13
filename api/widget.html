@@ -796,8 +796,11 @@
       }
       if (!tgt) return;
       if (isI) {
-        tgt.incPlan   += val;
-        tgt.vatInPlan += Math.round(val * 22 / 122);
+        tgt.incPlan += val;
+        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
+        if (!zeroIncCats[catName]) {
+          tgt.vatInPlan += Math.round(val * 22 / 122);
+        }
       }
       if (isE) {
         var t = getExpCatType(catName);
