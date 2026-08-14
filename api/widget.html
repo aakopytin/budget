@@ -1349,8 +1349,10 @@
       // Итого офисные
       var f25 = a ? a.e25 : 0, f26 = a ? a.e26 : 0, fCur = a ? a.eCur : 0;
       var b = getBudget(proj, 'exp');
+      var eb_off = d ? (d.be_eb || 0) : 0;
+      var hEb_off = d ? (d.hE_eb || 0) : 0;
       var plan = d ? d.plan_e : [0,0,0,0,0,0];
-      var fact = f25 + f26, ost = (b === 0 || !d || !d.be_plan) ? 0 : b - fact;
+      var fact = f25 + f26, ost = (b + eb_off === 0 || (!d || (!d.be_plan && !eb_off))) ? 0 : b + eb_off - fact;
       return sectionHdr('ОФИСНЫЕ РАСХОДЫ', '#f3f0ff', '#4c1d95', '#c4b5fd')
         + subRows
         + '<tr style="background:#ede9fe">'
@@ -1359,7 +1361,7 @@
         + TD(fmtK(f25, true), SEP + BT) + TD(fmtK(f26, true), BT)
         + TD(fmtK(fact, true), BT)
         + TD(fmtK(ost, true, true), (ost < 0 ? ';color:#dc2626' : '') + BT)
-        + TD(dash(), SEP + BT) + TD(fmtK(d ? d.hE : 0, true), BT) + TD(fmtK(fCur, true), BT)
+        + TD(fmtK(hEb_off, true), SEP + BT) + TD(fmtK(d ? d.hE : 0, true), BT) + TD(fmtK(fCur, true), BT)
         + plan.map(function(v, i) { return TD(fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
         + '</tr>';
     }
