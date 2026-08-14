@@ -524,7 +524,7 @@
     });
     var offBrkPlan = {};
     OFF_SUBCATS.forEach(function(s) {
-      offBrkPlan[s.code] = {be_plan:0, hE:0, plan_e:[0,0,0,0,0,0]};
+      offBrkPlan[s.code] = {be_plan:0, hE:0, hE_eb:0, plan_e:[0,0,0,0,0,0]};
     });
     // Плановые поступления/выплаты займов → финансовая деятельность
     var finPlan = {
@@ -612,6 +612,12 @@
       if (iy === curYear && im === curMonth) {
         if (isI) d.hI_eb += val;
         if (isE) d.hE_eb += val;
+      }
+      // Разбивка внебюджета по подкатегориям для офисных проектов
+      if (OXR_PIDS[item.project_id] && isE && iy === curYear && im === curMonth) {
+        var catNameEb = (catMap && catMap[item.category_id]) || '';
+        var subEb = offSubcat(catNameEb);
+        if (offBrkPlan[subEb]) offBrkPlan[subEb].hE_eb += val;
       }
     });
     return {pm: pm, offBrkPlan: offBrkPlan, finPlan: finPlan};
@@ -1395,7 +1401,7 @@
           + TD(fmtK(brk.f25), SEP) + TD(fmtK(brk.f26))
           + TD(fmtK(tot, true))
           + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
-          + TD(dash(), SEP) + TD(fmtK(hE)) + TD(fmtK(brk.fCur))
+          + TD(fmtK(obp ? (obp.hE_eb || 0) : 0), SEP) + TD(fmtK(hE)) + TD(fmtK(brk.fCur))
           + (obp ? obp.plan_e : [0,0,0,0,0,0]).map(function(v, i) {
               return TD(fmtK(v), i === 0 ? SEP : '');
             }).join('')
