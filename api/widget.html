@@ -1530,20 +1530,21 @@
           var sgn = v < 0 ? '− ' : '+ ';
           return '<span style="color:' + clr + ';font-weight:600">' + sgn + s + '</span>';
         }
-        var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan - sd.reserve;
-        var plannedPrev = sdPrev ? sdPrev.cashBalance + sdPrev.incOst - sdPrev.expOst + sdPrev.finOst + sdPrev.vatFact + sdPrev.vatPlan - sdPrev.reserve : null;
         var LS  = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb';
         var VS  = 'padding:3px 6px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #e5e7eb';
         var VSP = VS + ';color:#6b7280';
+        var VSD = VS + ';border-left:1px solid #e5e7eb';
         var ES  = 'border-bottom:1px solid #e5e7eb';
-        function sdRow(lbl, valHtml, valPrevHtml, bg) {
+        function sdRow(lbl, valHtml, valPrevHtml, diffHtml, bg) {
           return '<tr' + (bg ? ' style="background:' + bg + '"' : '') + '>'
             + '<td colspan="2" style="' + LS + (bg ? ';background:' + bg : '') + '">' + lbl + '</td>'
             + '<td style="' + VS  + (bg ? ';background:' + bg : '') + '">' + valHtml + '</td>'
             + '<td style="' + VSP + (bg ? ';background:' + bg : '') + '">' + (valPrevHtml || '') + '</td>'
-            + '<td colspan="10" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>'
+            + '<td style="' + VSD + (bg ? ';background:' + bg : '') + '">' + (diffHtml || '') + '</td>'
+            + '<td colspan="9" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>'
             + '</tr>';
         }
+        var reserveDiff = sdPrev ? sdFmt(sd.reserve - sdPrev.reserve) : null;
         return '<tr style="background:#1e3a5f">'
           + '<td colspan="14" style="padding:3px 6px;font-size:9px;font-weight:700;color:#a8c4e0;letter-spacing:0.08em;text-transform:uppercase">ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ · тыс. руб.</td>'
           + '</tr>'
@@ -1551,20 +1552,22 @@
           + '<td colspan="2" style="border-bottom:1px solid #2d4f7c"></td>'
           + '<td style="padding:2px 6px;text-align:right;font-size:9px;color:#a8c4e0;white-space:nowrap;border-bottom:1px solid #2d4f7c">' + sd.dateStr + '</td>'
           + '<td style="padding:2px 6px;text-align:right;font-size:9px;color:#6b8ba4;white-space:nowrap;border-bottom:1px solid #2d4f7c">' + (sdPrev ? sdPrev.dateStr : '') + '</td>'
-          + '<td colspan="10" style="border-bottom:1px solid #2d4f7c"></td>'
+          + '<td style="padding:2px 6px;text-align:center;font-size:9px;color:#6b8ba4;white-space:nowrap;border-bottom:1px solid #2d4f7c">Δ</td>'
+          + '<td colspan="9" style="border-bottom:1px solid #2d4f7c"></td>'
           + '</tr>'
-          + sdRow('Остаток ДС', fmtBal(sd.cashBalance, false), sdPrev ? fmtBal(sdPrev.cashBalance, false) : null)
-          + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst),    sdPrev ? sdFmt(sdPrev.incOst)    : null)
-          + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst),   sdPrev ? sdFmt(-sdPrev.expOst)   : null)
-          + sdRow('Ожидаемые займы',        sdFmt(sd.finOst),    sdPrev ? sdFmt(sdPrev.finOst)    : null)
-          + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null)
-          + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null)
-          + sdRow('Изменение резерва',      sdFmt(sd.reserve),   sdPrev ? sdFmt(sdPrev.reserve)   : null, '#fefce8')
+          + sdRow('Остаток ДС', fmtBal(sd.cashBalance, false), sdPrev ? fmtBal(sdPrev.cashBalance, false) : null, null)
+          + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst),    sdPrev ? sdFmt(sdPrev.incOst)    : null, null)
+          + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst),   sdPrev ? sdFmt(-sdPrev.expOst)   : null, null)
+          + sdRow('Ожидаемые займы',        sdFmt(sd.finOst),    sdPrev ? sdFmt(sdPrev.finOst)    : null, null)
+          + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null, null)
+          + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null, null)
+          + sdRow('Резерв на выплаты',      sdFmt(sd.reserve),   sdPrev ? sdFmt(sdPrev.reserve)   : null, reserveDiff, '#fefce8')
           + '<tr style="background:#f0fdf4">'
           + '<td colspan="2" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
-          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">' + sdFmt(planned) + '</td>'
-          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;color:#6b7280">' + (plannedPrev !== null ? sdFmt(plannedPrev) : '') + '</td>'
-          + '<td colspan="10" style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"></td>'
+          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"><span style="color:#9ca3af">0</span></td>'
+          + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;color:#6b7280"><span style="color:#9ca3af">0</span></td>'
+          + '<td style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;border-left:1px solid #e5e7eb"></td>'
+          + '<td colspan="9" style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"></td>'
           + '</tr>'
           + '<tr><td colspan="14" style="height:8px;background:#e8edf3;border-bottom:3px solid #1e3a5f"></td></tr>'
       })()
@@ -1791,56 +1794,65 @@
         _rezExp += Math.max(0, (a.eCur || 0) - (d.hE || 0));
       });
 
+      var _cashBal = factResult.vEnd + factResult.tEnd;
+      var _vF      = -(vf.vfFactVatRes  || 0);
+      var _vP      = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
       var _sd = {
         dateStr:     today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4),
-        cashBalance: factResult.vEnd + factResult.tEnd,
+        cashBalance: _cashBal,
         incOst:      _incOst,
         expOst:      _expOst,
         finOst:      _finNetOst,
-        vatFact:     -(vf.vfFactVatRes  || 0),           // >0 к возмещению (+), <0 к уплате (-)
-        vatPlan:     -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0)),  // Прогноз = ИТОГО − Факт
-        reserve:     _rezInc - _rezExp
+        vatFact:     _vF,
+        vatPlan:     _vP,
+        reserve:     -(_cashBal + _incOst - _expOst + _finNetOst + _vF + _vP)
       };
 
-      // Вчерашние данные для колонки сравнения
-      var _todayPrev = (function(){
-        var d = new Date(today); d.setDate(d.getDate() - 2);
-        return d.toISOString().slice(0,10);
-      })();
-      var _frP = calcFact(txns, catMap, yr, mo, _todayPrev);
-      var _vfP = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, _todayPrev);
-      var _aP  = _frP.acc, _fnP = _frP.fin;
-      function _sumOstP(type) {
-        var tot = 0;
-        PROJECTS.forEach(function(p) {
-          var d = pm[p], a = _aP[p];
-          var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
-          var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
-          var pl = type === 'inc' ? d.bi_plan : d.be_plan;
-          tot += (b === 0 || !pl) ? 0 : b - pf;
-        });
-        return tot;
+      // База: конец предыдущего месяца — фиксируется на весь текущий месяц (localStorage)
+      var _baseKey = 'sdBase_' + yr + '_' + (mo < 10 ? '0' : '') + mo;
+      var _sdPrev = null;
+      try { _sdPrev = JSON.parse(localStorage.getItem(_baseKey) || 'null'); } catch(e) {}
+      if (!_sdPrev) {
+        var _prevMonthEnd = (function() {
+          var d = new Date(today); d.setDate(1); d.setDate(0);
+          return d.toISOString().slice(0,10);
+        })();
+        var _frP = calcFact(txns, catMap, yr, mo, _prevMonthEnd);
+        var _vfP = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, _prevMonthEnd);
+        var _aP = _frP.acc, _fnP = _frP.fin;
+        var _sumOstP = function(type) {
+          var tot = 0;
+          PROJECTS.forEach(function(p) {
+            var d = pm[p], a = _aP[p];
+            var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
+            var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
+            var pl = type === 'inc' ? d.bi_plan : d.be_plan;
+            tot += (b === 0 || !pl) ? 0 : b - pf;
+          });
+          return tot;
+        };
+        var _skInBP  = _fnP.skIn.f25  + (_fnP.skIn.f26  - _fnP.skIn.fCur)  + _fp.skIn.hI  + _skInPS;
+        var _skInOP  = (_skInBP  === 0 || (!_fp.skIn.hI  && !_skInPS))  ? 0 : _skInBP  - (_fnP.skIn.f25  + _fnP.skIn.f26);
+        var _skOutBP = _fnP.skOut.f25 + (_fnP.skOut.f26 - _fnP.skOut.fCur) + _fp.skOut.hE + _skOutPS;
+        var _skOutOP = (_skOutBP === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutBP - (_fnP.skOut.f25 + _fnP.skOut.f26);
+        var _pCashBal = _frP.vEnd + _frP.tEnd;
+        var _pIncOst  = _sumOstP('inc');
+        var _pExpOst  = _sumOstP('exp');
+        var _pFinOst  = _skInOP - _skOutOP;
+        var _pVatFact = -(_vfP.vfFactVatRes  || 0);
+        var _pVatPlan = -((_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0));
+        _sdPrev = {
+          dateStr:     _prevMonthEnd.slice(8,10) + '.' + _prevMonthEnd.slice(5,7) + '.' + _prevMonthEnd.slice(0,4),
+          cashBalance: _pCashBal,
+          incOst:      _pIncOst,
+          expOst:      _pExpOst,
+          finOst:      _pFinOst,
+          vatFact:     _pVatFact,
+          vatPlan:     _pVatPlan,
+          reserve:     -(_pCashBal + _pIncOst - _pExpOst + _pFinOst + _pVatFact + _pVatPlan)
+        };
+        try { localStorage.setItem(_baseKey, JSON.stringify(_sdPrev)); } catch(e) {}
       }
-      var _skInBP  = _fnP.skIn.f25  + (_fnP.skIn.f26  - _fnP.skIn.fCur)  + _fp.skIn.hI  + _skInPS;
-      var _skInOP  = (_skInBP  === 0 || (!_fp.skIn.hI  && !_skInPS))  ? 0 : _skInBP  - (_fnP.skIn.f25  + _fnP.skIn.f26);
-      var _skOutBP = _fnP.skOut.f25 + (_fnP.skOut.f26 - _fnP.skOut.fCur) + _fp.skOut.hE + _skOutPS;
-      var _skOutOP = (_skOutBP === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutBP - (_fnP.skOut.f25 + _fnP.skOut.f26);
-      var _rezIncP = 0, _rezExpP = 0;
-      PROJECTS.forEach(function(p) {
-        var a = _aP[p], d = pm[p];
-        _rezIncP += Math.max(0, (a.iCur || 0) - (d.hI || 0));
-        _rezExpP += Math.max(0, (a.eCur || 0) - (d.hE || 0));
-      });
-      var _sdPrev = {
-        dateStr:     _todayPrev.slice(8,10) + '.' + _todayPrev.slice(5,7) + '.' + _todayPrev.slice(0,4),
-        cashBalance: _frP.vEnd + _frP.tEnd,
-        incOst:      _sumOstP('inc'),
-        expOst:      _sumOstP('exp'),
-        finOst:      _skInOP - _skOutOP,
-        vatFact:     -(_vfP.vfFactVatRes  || 0),
-        vatPlan:     -((_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0)),
-        reserve:     _rezIncP - _rezExpP
-      };
       // ────────────────────────────────────────────────────────────────────
 
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev)
