@@ -1792,8 +1792,9 @@
             ? a.i25 + (a.i26 - a.iCur) + d.bi_plan
             : a.e25 + (a.e26 - a.eCur) + d.be_plan;
           var planPart = type === 'inc' ? d.bi_plan : d.be_plan;
+          var eb   = type === 'inc' ? (d.bi_eb || 0) : (d.be_eb || 0);
           var pFact = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
-          tot += (b === 0 || !planPart) ? 0 : b - pFact;
+          tot += (b + eb === 0 || (!planPart && !eb)) ? 0 : b + eb - pFact;
         });
         return tot;
       }
@@ -1841,7 +1842,8 @@
             var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
             var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
             var pl = type === 'inc' ? d.bi_plan : d.be_plan;
-            tot += (b === 0 || !pl) ? 0 : b - pf;
+            var eb = type === 'inc' ? (d.bi_eb || 0) : (d.be_eb || 0);
+            tot += (b + eb === 0 || (!pl && !eb)) ? 0 : b + eb - pf;
           });
           return tot;
         };
