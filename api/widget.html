@@ -1212,6 +1212,61 @@
       + '</div>';
   }
 
+  // Раскрывающийся список транзакций по счёту Внебюджетный лимит
+  function buildEbDetails(planItems, catMap, curYear, curMonth) {
+    var items = (planItems || []).filter(function(item) {
+      if (item.org_account_id !== 150) return false;
+      var iy = parseInt((item.plan_paid_date || '').substring(0, 4));
+      var im = parseInt((item.plan_paid_date || '').substring(5, 7));
+      return iy === curYear && im === curMonth;
+    });
+    if (!items.length) return '';
+
+    items.sort(function(a, b) {
+      return (b.plan_paid_date || '').localeCompare(a.plan_paid_date || '');
+    });
+
+    var total = items.reduce(function(s, item) { return s + (item.total || 0); }, 0);
+    var fmtFull = function(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); };
+    var fmtK    = function(v) { return new Intl.NumberFormat('ru-RU').format(Math.round((v || 0) / 1000)); };
+
+    var rows = items.map(function(item) {
+      var dt = item.plan_paid_date || '';
+      var dateStr = dt.length >= 10
+        ? dt.slice(8, 10) + '.' + dt.slice(5, 7) + '.' + dt.slice(0, 4) : dt;
+      var cat  = catMap[item.category_id] || '';
+      var proj = PID_MAP[item.project_id] || ('id:' + item.project_id);
+      var name = item.name || item.note || cat;
+      var isExp = item.type === 40;
+      var amt   = item.total || 0;
+      return '<tr>'
+        + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + dateStr + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:220px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + proj + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;font-weight:600;color:'
+          + (isExp ? '#dc2626' : '#15803d') + '">'
+          + (isExp ? '− ' : '+ ') + fmtFull(amt) + ' р.</td>'
+        + '</tr>';
+    }).join('');
+
+    return '<details style="margin-top:6px;font-family:sans-serif">'
+      + '<summary style="cursor:pointer;padding:5px 8px;font-size:10.5px;color:#6b7280;'
+      + 'list-style:none;-webkit-appearance:none;user-select:none;background:#f8f9fd;'
+      + 'border-top:1px solid #e5e7eb">'
+      + '&#9660; Внебюджетный лимит (' + items.length + ' тр. на ' + fmtK(total) + ' тыс. р.)'
+      + '</summary>'
+      + '<table style="width:100%;border-collapse:collapse;background:#fff">'
+      + '<tr style="background:#f3f4f6">'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:left;color:#9ca3af;font-weight:600;white-space:nowrap">Дата</th>'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:left;color:#9ca3af;font-weight:600">Контрагент / Категория</th>'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:left;color:#9ca3af;font-weight:600;white-space:nowrap">Проект</th>'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:right;color:#9ca3af;font-weight:600;white-space:nowrap">Сумма, р.</th>'
+      + '</tr>'
+      + rows
+      + '</table>'
+      + '</details>';
+  }
+
   // Построение таблицы
   function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd, sdPrev) {
     var acc    = result.acc;
@@ -1888,7 +1943,8 @@
       // ────────────────────────────────────────────────────────────────────
 
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev)
-        + buildVatForecastTable(vf);
+        + buildVatForecastTable(vf)
+        + buildEbDetails(planItems, catMap, yr, mo);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
