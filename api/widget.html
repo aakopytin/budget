@@ -1274,7 +1274,7 @@
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd, sdPrev) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd, sdPrev, ebHtml) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
@@ -1656,6 +1656,7 @@
           + '<td style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;border-left:1px solid #e5e7eb"></td>'
           + '<td colspan="10" style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"></td>'
           + '</tr>'
+          + (ebHtml ? '<tr><td colspan="15" style="padding:0;background:#f8f9fd">' + ebHtml + '</td></tr>' : '')
           + '<tr><td colspan="15" style="height:8px;background:#e8edf3;border-bottom:3px solid #1e3a5f"></td></tr>'
       })()
 
@@ -1948,9 +1949,9 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev)
-        + buildVatForecastTable(vf)
-        + buildEbDetails(planItems, catMap, yr, mo);
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo);
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
+        + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
