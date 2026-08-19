@@ -842,6 +842,31 @@
       }
     });
 
+    // ── Шаг 5b: план — Внебюджетный лимит (org_account_id=150) ──────────
+    (planItems || []).forEach(function(item) {
+      if (item.org_account_id !== 150) return;
+      if (item.type !== 40) return;  // только расходы
+      var dt = item.plan_paid_date || '';
+      if (dt.length < 7) return;
+      var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var val     = item.total || 0;
+      var catName = catMap[item.category_id] || '';
+      if (LOAN_CATS[catName]) return;
+      var tgt = null;
+      if (pYM >= dalYM) {
+        tgt = dal;
+      } else {
+        for (var ci = 0; ci < 9; ci++) {
+          if (cols[ci].ym === pYM) { tgt = data[ci]; break; }
+        }
+      }
+      if (!tgt) return;
+      var t = getExpCatType(catName);
+      var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
+      tgt.expPlan    += val;
+      tgt.vatOutPlan += Math.round(val * rOut);
+    });
+
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
       if (col.isPast) {
