@@ -880,6 +880,9 @@
         if (!today || dt <= today) ebTxnPmMap[tx.id] = tx.plan_money_id;
       }
     });
+    // Множество план-пунктов, по которым есть факт-платёж
+    var paidPmIds = {};
+    Object.keys(ebTxnPmMap).forEach(function(txId) { paidPmIds[ebTxnPmMap[txId]] = true; });
     // plan_money_id → реальный НДС (из PLS через reference_id)
     var ebPmVatMap = {};
     var vfEbVatAdj = 0;
@@ -988,7 +991,7 @@
             vatAdj: vatAdj,
             vfFactVatRes: vfFactVatRes,
             vfItogoVatRes: vfItogoVatRes,
-            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap};
+            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds};
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1298,9 +1301,10 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds) {
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
+    paidPmIds = paidPmIds || {};
     var items = (planItems || []).filter(function(item) {
       if (item.org_account_id !== 150) return false;
       var iy = parseInt((item.plan_paid_date || '').substring(0, 4));
@@ -1319,10 +1323,12 @@
 
     function ebVat(item) {
       var amt = item.total || 0;
-      if (item.id !== undefined && ebPmVatMap[item.id] !== undefined) {
-        var vat = Math.round(ebPmVatMap[item.id]);
+      // Если есть факт-платёж — берём реальный НДС из PLS (может быть 0)
+      if (item.id !== undefined && paidPmIds[item.id]) {
+        var vat = Math.round(ebPmVatMap[item.id] || 0);
         return { net: amt - vat, vat: vat };
       }
+      // Нет факт-платежа — расчётная оценка по ставке
       var catName = catMap[item.category_id] || '';
       var rate;
       if (item.type === 40) {
@@ -2065,7 +2071,7 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {});
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {});
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
