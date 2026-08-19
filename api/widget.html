@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -867,29 +867,33 @@
       tgt.vatOutPlan += Math.round(val * rOut);
     });
 
-    // ── Шаг 5c: реальный НДС по внебюджетным фактическим платежам ────────
+    // ── Шаг 5c: фактический НДС по внебюджетным платежам (effRates × факт. сумма) ──
     var ebPlanIds = {};
     (planItems || []).forEach(function(item) {
       if (item.org_account_id === 150 && item.id) ebPlanIds[item.id] = true;
     });
-    // paidPmIds — план-пункты с любым фактическим платежом
-    // ebPmVatMap — план_money_id → фактический НДС из cat 3157/3158
-    var paidPmIds = {}, ebPmVatMap = {}, vfEbVatAdj = 0;
+    // plan_money_id → {vat, paid} — реальный НДС из фактических сумм
+    var ebPmVatMap = {}, paidPmIds = {}, vfEbVatAdj = 0;
     txns.forEach(function(tx) {
       var pmId = tx.plan_money_id;
       if (!pmId || !ebPlanIds[pmId]) return;
       var dt = tx.date || '';
       if (today && dt > today) return;
-      paidPmIds[pmId] = true;
-      if (tx.category_id === 3157) {
-        var v = parseFloat(tx.outcome) || 0;
-        vfEbVatAdj += v;
-        ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) + v;
-      } else if (tx.category_id === 3158) {
-        var v = parseFloat(tx.income) || 0;
-        vfEbVatAdj -= v;
-        ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) - v;
+      var catName = catMap[tx.category_id] || '';
+      if (LOAN_CATS[catName]) return;
+      var expAmt = parseFloat(tx.outcome) || 0;
+      var incAmt = parseFloat(tx.income)  || 0;
+      var vatDelta = 0;
+      if (expAmt > 0) {
+        var tE = getExpCatType(catName);
+        var rE = (tE && tE !== null) ? (effRates[tE] || 0) : 0;
+        vatDelta = Math.round(expAmt * rE);
+      } else if (incAmt > 0) {
+        vatDelta = -Math.round(incAmt * 22 / 122);
       }
+      paidPmIds[pmId] = true;
+      ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) + vatDelta;
+      vfEbVatAdj += vatDelta;
     });
 
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
