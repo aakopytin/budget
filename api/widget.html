@@ -867,6 +867,33 @@
       tgt.vatOutPlan += Math.round(val * rOut);
     });
 
+    // ── Шаг 5c: НДС по фактическим внебюджетным платежам ───────────────
+    // Ищем транзакции, привязанные к plan_money с org_account_id=150
+    var ebPlanIdCats = {};
+    (planItems || []).forEach(function(item) {
+      if (item.org_account_id === 150 && item.id) ebPlanIdCats[item.id] = item.category_id;
+    });
+    var vfEbVatAdj = 0;  // >0 = вычет (расходы), <0 = к доплате (поступления)
+    txns.forEach(function(tx) {
+      var pmId = tx.plan_money_id;
+      if (!pmId || !ebPlanIdCats[pmId]) return;
+      var catId = ebPlanIdCats[pmId];
+      var catName = catMap[catId] || '';
+      if (LOAN_CATS[catName]) return;
+      var dt = tx.date || '';
+      if (today && dt > today) return;
+      var expAmt = parseFloat(tx.outcome) || 0;
+      var incAmt = parseFloat(tx.income)  || 0;
+      if (expAmt > 0) {
+        var tE = getExpCatType(catName);
+        var rE = (tE && tE !== null) ? (effRates[tE] || 0) : 0;
+        vfEbVatAdj += Math.round(expAmt * rE);
+      }
+      if (incAmt > 0) {
+        vfEbVatAdj -= Math.round(incAmt * 22 / 122);
+      }
+    });
+
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
       if (col.isPast) {
@@ -934,7 +961,8 @@
             rejectedIncCats: rejectedIncCats,
             vatAdj: vatAdj,
             vfFactVatRes: vfFactVatRes,
-            vfItogoVatRes: vfItogoVatRes};
+            vfItogoVatRes: vfItogoVatRes,
+            vfEbVatAdj: vfEbVatAdj};
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1244,7 +1272,8 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates) {
+    effRates = effRates || {};
     var items = (planItems || []).filter(function(item) {
       if (item.org_account_id !== 150) return false;
       var iy = parseInt((item.plan_paid_date || '').substring(0, 4));
@@ -1261,7 +1290,22 @@
     var fmtFull = function(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); };
     var fmtK    = function(v) { return new Intl.NumberFormat('ru-RU').format(Math.round((v || 0) / 1000)); };
 
-    var rows = items.map(function(item) {
+    function ebVat(item) {
+      var catName = catMap[item.category_id] || '';
+      var amt = item.total || 0;
+      var rate;
+      if (item.type === 40) {
+        var t = getExpCatType(catName);
+        rate = (t && t !== null) ? (effRates[t] || 0) : 0;
+      } else {
+        rate = 22 / 122;
+      }
+      var vat = Math.round(amt * rate);
+      return { net: amt - vat, vat: vat };
+    }
+
+    var totAmt = 0, totNet = 0, totVat = 0;
+        var rows = items.map(function(item) {
       var dt = item.plan_paid_date || '';
       var dateStr = dt.length >= 10
         ? dt.slice(8, 10) + '.' + dt.slice(5, 7) + '.' + dt.slice(0, 4) : dt;
@@ -1270,30 +1314,44 @@
       var name = item.name || item.note || cat;
       var isExp = item.type === 40;
       var amt   = item.total || 0;
+      var v = ebVat(item);
+      totAmt += amt; totNet += v.net; totVat += v.vat;
       return '<tr>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + dateStr + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:220px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:200px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + proj + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;font-weight:600;color:'
-          + (isExp ? '#dc2626' : '#15803d') + '">'
-          + (isExp ? '− ' : '+ ') + fmtFull(amt) + ' р.</td>'
+          + (isExp ? '#dc2626' : '#15803d') + '">' 
+          + (isExp ? '- ' : '+ ') + fmtFull(amt) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + fmtFull(v.net) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + fmtFull(v.vat) + '</td>'
         + '</tr>';
     }).join('');
+
+    var totalRow = '<tr style="background:#f3f4f6;font-weight:600">'
+      + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#374151;text-align:right">Итого</td>'
+      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#dc2626">' + fmtFull(totAmt) + '</td>'
+      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#374151">' + fmtFull(totNet) + '</td>'
+      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#6b7280">' + fmtFull(totVat) + '</td>'
+      + '</tr>';
 
     return '<details style="margin-top:6px;font-family:sans-serif">'
       + '<summary style="cursor:pointer;padding:5px 8px;font-size:10.5px;color:#6b7280;'
       + 'list-style:none;-webkit-appearance:none;user-select:none;background:#f8f9fd;'
       + 'border-top:1px solid #e5e7eb">'
-      + '&#9660; Внебюджетный лимит (' + items.length + ' тр. на ' + fmtK(total) + ' тыс. р.)'
+      + '&#9660; Внебюджетный лимит (' + items.length + ' тр. на ' + fmtK(totAmt) + ' тыс. р.)'
       + '</summary>'
       + '<table style="width:100%;border-collapse:collapse;background:#fff">'
       + '<tr style="background:#f3f4f6">'
       + '<th style="padding:2px 8px;font-size:9.5px;text-align:left;color:#9ca3af;font-weight:600;white-space:nowrap">Дата</th>'
       + '<th style="padding:2px 8px;font-size:9.5px;text-align:left;color:#9ca3af;font-weight:600">Контрагент / Категория</th>'
       + '<th style="padding:2px 8px;font-size:9.5px;text-align:left;color:#9ca3af;font-weight:600;white-space:nowrap">Проект</th>'
-      + '<th style="padding:2px 8px;font-size:9.5px;text-align:right;color:#9ca3af;font-weight:600;white-space:nowrap">Сумма, р.</th>'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:right;color:#9ca3af;font-weight:600;white-space:nowrap">Сумма</th>'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:right;color:#9ca3af;font-weight:600;white-space:nowrap">Без НДС</th>'
+      + '<th style="padding:2px 8px;font-size:9.5px;text-align:right;color:#9ca3af;font-weight:600;white-space:nowrap">НДС</th>'
       + '</tr>'
       + rows
+      + totalRow
       + '</table>'
       + '</details>';
   }
@@ -1960,7 +2018,9 @@
       }
 
       // Ожидаемый плановый НДС = база начала месяца − изменение текущего НДС за период
-      var _vP = _sdPrev ? _sdPrev.vatPlan - (_vF - _sdPrev.vatFact) : _vP_raw;
+      // + НДС по фактическим внебюджетным платежам (расходы увеличивают, поступления уменьшают)
+      var _ebVatAdj = vf ? (vf.vfEbVatAdj || 0) : 0;
+      var _vP = (_sdPrev ? _sdPrev.vatPlan - (_vF - _sdPrev.vatFact) : _vP_raw) + _ebVatAdj;
 
       var _sd = {
         dateStr:     today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4),
@@ -1974,7 +2034,7 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo);
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {});
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
