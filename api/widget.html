@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
@@ -872,56 +872,25 @@
     (planItems || []).forEach(function(item) {
       if (item.org_account_id === 150 && item.id) ebPlanIds[item.id] = true;
     });
-    // txn.id → plan_money_id для внебюджетных транзакций (не будущих)
-    var ebTxnPmMap = {};
+    // paidPmIds — план-пункты с любым фактическим платежом
+    // ebPmVatMap — план_money_id → фактический НДС из cat 3157/3158
+    var paidPmIds = {}, ebPmVatMap = {}, vfEbVatAdj = 0;
     txns.forEach(function(tx) {
-      if (tx.plan_money_id && ebPlanIds[tx.plan_money_id]) {
-        var dt = tx.date || '';
-        if (!today || dt <= today) ebTxnPmMap[tx.id] = tx.plan_money_id;
-      }
-    });
-    // Множество план-пунктов, по которым есть факт-платёж
-    var paidPmIds = {};
-    Object.keys(ebTxnPmMap).forEach(function(txId) { paidPmIds[ebTxnPmMap[txId]] = true; });
-    // plan_money_id → реальный НДС (из PLS через reference_id)
-    var ebPmVatMap = {};
-    var vfEbVatAdj = 0;
-    (plsItems || []).forEach(function(p) {
-      var pmId = ebTxnPmMap[p.reference_id];
-      if (!pmId) return;
-      var dt = p.date || '';
+      var pmId = tx.plan_money_id;
+      if (!pmId || !ebPlanIds[pmId]) return;
+      var dt = tx.date || '';
       if (today && dt > today) return;
-      if (p.category_id === 3157) {
-        var v = parseFloat(p.outcome) || 0;
+      paidPmIds[pmId] = true;
+      if (tx.category_id === 3157) {
+        var v = parseFloat(tx.outcome) || 0;
         vfEbVatAdj += v;
         ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) + v;
-      } else if (p.category_id === 3158) {
-        var v = parseFloat(p.income) || 0;
+      } else if (tx.category_id === 3158) {
+        var v = parseFloat(tx.income) || 0;
         vfEbVatAdj -= v;
         ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) - v;
       }
     });
-    // Если PLS-данных нет — fallback на эффективные ставки
-    if (vfEbVatAdj === 0) {
-      txns.forEach(function(tx) {
-        if (!tx.plan_money_id || !ebPlanIds[tx.plan_money_id]) return;
-        var dt = tx.date || '';
-        if (today && dt > today) return;
-        var catId = tx.category_id;
-        var catName = catMap[catId] || '';
-        if (LOAN_CATS[catName]) return;
-        var expAmt = parseFloat(tx.outcome) || 0;
-        var incAmt = parseFloat(tx.income)  || 0;
-        if (expAmt > 0) {
-          var tE = getExpCatType(catName);
-          var rE = (tE && tE !== null) ? (effRates[tE] || 0) : 0;
-          vfEbVatAdj += Math.round(expAmt * rE);
-        }
-        if (incAmt > 0) {
-          vfEbVatAdj -= Math.round(incAmt * 22 / 122);
-        }
-      });
-    }
 
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
@@ -1323,12 +1292,12 @@
 
     function ebVat(item) {
       var amt = item.total || 0;
-      // Если есть факт-платёж — берём реальный НДС из PLS (может быть 0)
-      if (item.id !== undefined && paidPmIds[item.id]) {
+      // Оплачен — берём реальный НДС из транзакций cat 3157/3158 (может быть 0)
+      if (paidPmIds[item.id]) {
         var vat = Math.round(ebPmVatMap[item.id] || 0);
         return { net: amt - vat, vat: vat };
       }
-      // Нет факт-платежа — расчётная оценка по ставке
+      // Не оплачен — расчётная оценка по эффективной ставке
       var catName = catMap[item.category_id] || '';
       var rate;
       if (item.type === 40) {
