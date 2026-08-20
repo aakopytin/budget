@@ -1737,8 +1737,10 @@
         if (!sd) return '';
         function sdFmt(v) {
           if (v === 0) return '<span style="color:#9ca3af">0</span>';
-          var abs = Math.round(Math.abs(v) / 1000);
-          var s = abs.toLocaleString('ru-RU');
+          var absV = Math.abs(v) / 1000;
+          var parts = absV.toFixed(1).split('.');
+          parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+          var s = parts.join('.');
           var clr = v < 0 ? '#dc2626' : '#15803d';
           var sgn = v < 0 ? '− ' : '+ ';
           return '<span style="color:' + clr + ';font-weight:600">' + sgn + s + '</span>';
@@ -2010,6 +2012,35 @@
       });
 
       var _cashBal = factResult.vEnd + factResult.tEnd;
+
+      // ── DEBUG: компоненты expOst и cashBal (удалить после диагностики) ──
+      (function() {
+        var _dbSumOst = _sumOst('exp');
+        var _dbEbAdj  = vf ? (vf.vfEbExpAdj || 0) : 0;
+        var _dbExpOst = _dbSumOst + _dbEbAdj;
+        var _dbProj   = {};
+        PROJECTS.forEach(function(p) {
+          var d = pm[p], a = _acc[p];
+          var bePlan = d.be_plan || 0, beEb = d.be_eb || 0, eCur = a.eCur || 0;
+          var e26 = a.e26 || 0, e25 = a.e25 || 0;
+          var planPart = bePlan, eb = beEb;
+          var b = e25 + (e26 - eCur) + bePlan;
+          var pFact = e25 + e26;
+          var contrib = (b + eb === 0 || (!planPart && !eb)) ? 0 : b + eb - pFact;
+          _dbProj[p] = { bePlan: bePlan, beEb: beEb, eCur: eCur, e26: e26, contrib: Math.round(contrib) };
+        });
+        console.log('DEBUG expOst', {
+          sumOst:     Math.round(_dbSumOst),
+          vfEbExpAdj: Math.round(_dbEbAdj),
+          expOst:     Math.round(_dbExpOst),
+          cashBal:    Math.round(_cashBal),
+          vEnd:       Math.round(factResult.vEnd),
+          tEnd:       Math.round(factResult.tEnd),
+          projects:   _dbProj
+        });
+      })();
+      // ── END DEBUG ──
+
       var _vF      = -(vf.vfFactVatRes  || 0);
       var _vP_raw  = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
 
