@@ -1811,7 +1811,8 @@
             var totExpOst = totContrib + ebAdj;
             var cashBal = vEnd + tEnd;
             var diffCash = sdPrev ? Math.round((cashBal - sdPrev.cashBalance)/1000*10)/10 : null;
-            var diffExp  = sdPrev ? Math.round((totExpOst - (-sdPrev.expOst))/1000*10)/10 : null;
+            var diffExp  = sdPrev ? Math.round((totExpOst - sdPrev.expOst)/1000*10)/10 : null;
+            var diffGap  = sdPrev ? Math.round((diffCash + diffExp)*10)/10 : null;
             var hdrS = 'padding:2px 5px;font-size:10px;font-weight:600;text-align:right;background:#f1f5f9;border-bottom:2px solid #cbd5e1;white-space:nowrap';
             var hdrL = hdrS + ';text-align:left';
             var totS = 'padding:2px 5px;font-size:10px;font-weight:700;text-align:right;background:#f1f5f9;border-top:2px solid #94a3b8;white-space:nowrap';
@@ -1847,12 +1848,16 @@
               + '<td style="' + csS + ';color:#6b7280">' + Math.round(cashBal/1000*10)/10 + '</td>'
               + '</tr>'
               + (sdPrev ? '<tr>'
-              + '<td style="' + csL + ';color:#dc2626;font-weight:700" colspan="4">Δ cashBal (vs sdPrev)</td>'
-              + '<td style="' + csS + ';color:#dc2626;font-weight:700">' + diffCash + '</td>'
+              + '<td style="' + csL + ';color:#374151" colspan="4">Δ cashBal (vs sdPrev)</td>'
+              + '<td style="' + csS + ';color:#374151">' + diffCash + '</td>'
               + '</tr>'
               + '<tr>'
-              + '<td style="' + csL + ';color:#dc2626;font-weight:700" colspan="4">Δ expOst (vs sdPrev)</td>'
-              + '<td style="' + csS + ';color:#dc2626;font-weight:700">' + diffExp + '</td>'
+              + '<td style="' + csL + ';color:#374151" colspan="4">Δ expOst (vs sdPrev)</td>'
+              + '<td style="' + csS + ';color:#374151">' + diffExp + '</td>'
+              + '</tr>'
+              + '<tr>'
+              + '<td style="' + csL + ';color:#dc2626;font-weight:700" colspan="4">ГЭП = Δcash + Δexp (→ 0 в норме)</td>'
+              + '<td style="' + csS + ';color:#dc2626;font-weight:700">' + diffGap + '</td>'
               + '</tr>' : '')
               + '</tfoot>'
               + '</table>'
