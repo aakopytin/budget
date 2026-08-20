@@ -897,6 +897,24 @@
         ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) - v;
       }
     });
+    // vfEbExpAdj: замена плановой валовой суммы на фактическую (для _expOst)
+    var ebActualGross = 0;
+    txns.forEach(function(tx) {
+      var pmId = tx.plan_money_id;
+      if (!pmId || !ebPlanIds[pmId]) return;
+      var dt = tx.date || '';
+      if (today && dt > today) return;
+      var catName = catMap[tx.category_id] || '';
+      if (LOAN_CATS[catName]) return;
+      if (tx.category_id === 3144 || tx.category_id === 3147) return;
+      ebActualGross += (parseFloat(tx.outcome) || 0) - (parseFloat(tx.income) || 0);
+    });
+    var ebPlanGrossForPaid = 0;
+    (planItems || []).forEach(function(item) {
+      if (item.org_account_id === 150 && paidPmIds[item.id])
+        ebPlanGrossForPaid += item.total || 0;
+    });
+    var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
 
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
@@ -966,7 +984,7 @@
             vatAdj: vatAdj,
             vfFactVatRes: vfFactVatRes,
             vfItogoVatRes: vfItogoVatRes,
-            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds};
+            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, vfEbExpAdj: vfEbExpAdj};
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1958,7 +1976,7 @@
         return tot;
       }
       var _incOst = _sumOst('inc');
-      var _expOst = _sumOst('exp');
+      var _expOst = _sumOst('exp') + (vf ? (vf.vfEbExpAdj || 0) : 0);
 
       // finNetOst (аналог buildTable)
       var _fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]},skOut:{hE:0,plan:[0,0,0,0,0,0]}};
