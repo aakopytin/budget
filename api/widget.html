@@ -2101,7 +2101,7 @@
       // Ожидаемый плановый НДС = база начала месяца − изменение текущего НДС за период
       // + НДС по фактическим внебюджетным платежам (расходы увеличивают, поступления уменьшают)
       var _ebVatAdj = vf ? (vf.vfEbVatAdj || 0) : 0;
-      var _vP = (_sdPrev ? _sdPrev.vatPlan - (_vF - _sdPrev.vatFact) : _vP_raw) + _ebVatAdj;
+      var _vP = _sdPrev ? _sdPrev.vatPlan - (_vF - _sdPrev.vatFact) : _vP_raw;
 
       var _sd = {
         dateStr:     today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4),
