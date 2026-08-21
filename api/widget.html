@@ -742,6 +742,7 @@
 
     // ── Шаг 3: факт — транзакции ──────────────────────────────────────────
     var rejectedIncCats = {};
+    var expFactCurByProj = {};  // per-project expFact current month (for debug table)
     txns.forEach(function(tx) {
       var dt = tx.date || '';
       if (dt.length < 7) return;
@@ -766,6 +767,8 @@
             data[ci].expFact += expAmt;  // весь isExpense-факт (включая внебюджетные типа Кирова)
             if (budgetedCatsByYM[tYM] && budgetedCatsByYM[tYM][catName])
               data[ci].expFactBud += expAmt;  // только статьи, присутствующие в acc=36
+            if (data[ci].isCurrent && projName)
+              expFactCurByProj[projName] = (expFactCurByProj[projName] || 0) + expAmt;
           }
           break;
         }
@@ -997,7 +1000,8 @@
             vatAdj: vatAdj,
             vfFactVatRes: vfFactVatRes,
             vfItogoVatRes: vfItogoVatRes,
-            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, vfEbExpAdj: vfEbExpAdj};
+            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, vfEbExpAdj: vfEbExpAdj,
+            expFactCurByProj: expFactCurByProj};
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1358,7 +1362,8 @@
       var isExp = item.type === 40;
       var amt   = item.total || 0;
       var v = ebVat(item);
-      totAmt += amt; totNet += v.net; totVat += v.vat;
+      var sign = isExp ? 1 : -1;
+      totAmt += sign * amt; totNet += sign * v.net; totVat += sign * v.vat;
       return '<tr>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + dateStr + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:100px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
@@ -1373,7 +1378,7 @@
 
     var totalRow = '<tr style="background:#f3f4f6;font-weight:600">'
       + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#374151;text-align:right">Итого</td>'
-      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#dc2626">' + fmtFull(totAmt) + '</td>'
+      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + (totAmt >= 0 ? '#dc2626' : '#15803d') + '">' + fmtFull(totAmt) + '</td>'
       + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#374151">' + fmtFull(totNet) + '</td>'
       + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#6b7280">' + fmtFull(totVat) + '</td>'
       + '</tr>';
@@ -1789,7 +1794,8 @@
             var csS = 'padding:2px 5px;font-size:10px;text-align:right;border-bottom:1px solid #e2e8f0;white-space:nowrap';
             var csL = 'padding:2px 5px;font-size:10px;text-align:left;border-bottom:1px solid #e2e8f0;white-space:nowrap';
             var rows = '';
-            var totBePlan = 0, totBeEb = 0, totECur = 0, totContrib = 0;
+            var totBePlan = 0, totBeEb = 0, totECur = 0, totContrib = 0, totExpFact = 0, totDiff = 0;
+            var efp = vf ? (vf.expFactCurByProj || {}) : {};
             PROJECTS.forEach(function(p) {
               var d = pm[p], a = acc[p];
               var bePlan = d.be_plan || 0, beEb = d.be_eb || 0, eCur = a.eCur || 0;
@@ -1797,14 +1803,19 @@
               var b = (a.e25||0) + ((a.e26||0) - eCur) + bePlan;
               var pFact = (a.e25||0) + (a.e26||0);
               var contrib = (b + eb === 0 || (!planPart && !eb)) ? 0 : b + eb - pFact;
-              if (!bePlan && !beEb && !eCur && !contrib) return;
+              var expFactP = efp[p] || 0;
+              var diffP = eCur - expFactP;
+              if (!bePlan && !beEb && !eCur && !contrib && !expFactP) return;
               totBePlan += bePlan; totBeEb += beEb; totECur += eCur; totContrib += contrib;
+              totExpFact += expFactP; totDiff += diffP;
               rows += '<tr>'
                 + '<td style="' + csL + '">' + p + '</td>'
                 + '<td style="' + csS + '">' + Math.round(bePlan/1000*10)/10 + '</td>'
                 + '<td style="' + csS + '">' + Math.round(beEb/1000*10)/10 + '</td>'
                 + '<td style="' + csS + '">' + Math.round(eCur/1000*10)/10 + '</td>'
                 + '<td style="' + csS + ';color:#374151">' + Math.round(contrib/1000*10)/10 + '</td>'
+                + '<td style="' + csS + ';color:#374151">' + Math.round(expFactP/1000*10)/10 + '</td>'
+                + '<td style="' + csS + ';color:' + (diffP < 0 ? '#dc2626' : '#15803d') + '">' + Math.round(diffP/1000*10)/10 + '</td>'
                 + '</tr>';
             });
             var ebAdj = vf ? (vf.vfEbExpAdj || 0) : 0;
@@ -1825,6 +1836,8 @@
               + '<th style="' + hdrS + '">Внебюджет (be_eb)</th>'
               + '<th style="' + hdrS + '">Факт мес. (eCur)</th>'
               + '<th style="' + hdrS + '">Вклад в expOst</th>'
+              + '<th style="' + hdrS + '">expFact (НДС Пр.)</th>'
+              + '<th style="' + hdrS + '">eCur − expFact</th>'
               + '</tr></thead>'
               + '<tbody>' + rows + '</tbody>'
               + '<tfoot>'
@@ -1834,29 +1847,31 @@
               + '<td style="' + totS + '">' + Math.round(totBeEb/1000*10)/10 + '</td>'
               + '<td style="' + totS + '">' + Math.round(totECur/1000*10)/10 + '</td>'
               + '<td style="' + totS + '">' + Math.round(totContrib/1000*10)/10 + '</td>'
+              + '<td style="' + totS + '">' + Math.round(totExpFact/1000*10)/10 + '</td>'
+              + '<td style="' + totS + ';color:' + (totDiff < 0 ? '#dc2626' : '#15803d') + '">' + Math.round(totDiff/1000*10)/10 + '</td>'
               + '</tr>'
               + '<tr>'
-              + '<td style="' + csL + ';color:#6b7280" colspan="4">+ vfEbExpAdj</td>'
+              + '<td style="' + csL + ';color:#6b7280" colspan="6">+ vfEbExpAdj</td>'
               + '<td style="' + csS + ';color:#6b7280">' + Math.round(ebAdj/1000*10)/10 + '</td>'
               + '</tr>'
               + '<tr>'
-              + '<td style="' + totL + ';color:#1e40af" colspan="4">= expOst итого</td>'
+              + '<td style="' + totL + ';color:#1e40af" colspan="6">= expOst итого</td>'
               + '<td style="' + totS + ';color:#1e40af">' + Math.round(totExpOst/1000*10)/10 + '</td>'
               + '</tr>'
               + '<tr>'
-              + '<td style="' + csL + ';color:#6b7280" colspan="4">cashBal (vEnd=' + Math.round(vEnd/1000*10)/10 + ' + tEnd=' + Math.round(tEnd/1000*10)/10 + ')</td>'
+              + '<td style="' + csL + ';color:#6b7280" colspan="6">cashBal (vEnd=' + Math.round(vEnd/1000*10)/10 + ' + tEnd=' + Math.round(tEnd/1000*10)/10 + ')</td>'
               + '<td style="' + csS + ';color:#6b7280">' + Math.round(cashBal/1000*10)/10 + '</td>'
               + '</tr>'
               + (sdPrev ? '<tr>'
-              + '<td style="' + csL + ';color:#374151" colspan="4">Δ cashBal (vs sdPrev)</td>'
+              + '<td style="' + csL + ';color:#374151" colspan="6">Δ cashBal (vs sdPrev)</td>'
               + '<td style="' + csS + ';color:#374151">' + diffCash + '</td>'
               + '</tr>'
               + '<tr>'
-              + '<td style="' + csL + ';color:#374151" colspan="4">Δ expOst (vs sdPrev)</td>'
+              + '<td style="' + csL + ';color:#374151" colspan="6">Δ expOst (vs sdPrev)</td>'
               + '<td style="' + csS + ';color:#374151">' + diffExp + '</td>'
               + '</tr>'
               + '<tr>'
-              + '<td style="' + csL + ';color:#dc2626;font-weight:700" colspan="4">ГЭП = Δcash + Δexp (→ 0 в норме)</td>'
+              + '<td style="' + csL + ';color:#dc2626;font-weight:700" colspan="6">ГЭП = Δcash + Δexp (→ 0 в норме)</td>'
               + '<td style="' + csS + ';color:#dc2626;font-weight:700">' + diffGap + '</td>'
               + '</tr>' : '')
               + '</tfoot>'
