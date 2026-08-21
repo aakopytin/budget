@@ -2059,7 +2059,8 @@
       var _vP_raw  = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
 
       // База: конец предыдущего месяца — фиксируется на весь текущий месяц (localStorage)
-      var _baseKey = 'sdBase_' + yr + '_' + (mo < 10 ? '0' : '') + mo;
+      // v3: EB-позиции исключены из расчёта прошлого месяца
+      var _baseKey = 'sdBase_v3_' + yr + '_' + (mo < 10 ? '0' : '') + mo;
       var _sdPrev = null;
       try { _sdPrev = JSON.parse(localStorage.getItem(_baseKey) || 'null'); } catch(e) {}
       if (!_sdPrev) {
@@ -2068,7 +2069,9 @@
           return d.toISOString().slice(0,10);
         })();
         var _frP = calcFact(txns, catMap, yr, mo, _prevMonthEnd);
-        var _vfP = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, _prevMonthEnd);
+        // EB-позиции (org_account_id=150) не входят в прогноз прошлого месяца
+        var _planNonEB = planItems.filter(function(i) { return i.org_account_id !== 150; });
+        var _vfP = calcVatForecast(txns, _planNonEB, plsItems, catMap, yr, mo, _prevMonthEnd);
         var _aP = _frP.acc, _fnP = _frP.fin;
         var _sumOstP = function(type) {
           var tot = 0;
@@ -2077,8 +2080,8 @@
             var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
             var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
             var pl = type === 'inc' ? d.bi_plan : d.be_plan;
-            var eb = type === 'inc' ? (d.bi_eb || 0) : (d.be_eb || 0);
-            tot += (b + eb === 0 || (!pl && !eb)) ? 0 : b + eb - pf;
+            // EB-позиции исключены: только бюджетный остаток
+            tot += (b === 0 || !pl) ? 0 : b - pf;
           });
           return tot;
         };
