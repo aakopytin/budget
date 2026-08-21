@@ -1372,8 +1372,8 @@
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;font-weight:600;color:'
           + (isExp ? '#dc2626' : '#15803d') + '">' 
           + (isExp ? '- ' : '+ ') + fmtFull(amt) + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + (isExp ? '- ' : '+ ') + fmtFull(v.net) + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + (isExp ? '- ' : '+ ') + fmtFull(v.vat) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + (isExp ? '- ' : '+ ') + fmtFull(Math.abs(v.net)) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + (isExp ? '- ' : '+ ') + fmtFull(Math.abs(v.vat)) + '</td>'
         + '</tr>';
     }).join('');
 
