@@ -1335,7 +1335,7 @@
       var amt = item.total || 0;
       // Оплачен — берём реальный НДС из транзакций cat 3157/3158 (может быть 0)
       if (paidPmIds[item.id]) {
-        var vat = Math.round(ebPmVatMap[item.id] || 0);
+        var vat = Math.abs(Math.round(ebPmVatMap[item.id] || 0));
         return { net: amt - vat, vat: vat };
       }
       // Не оплачен — расчётная оценка по эффективной ставке
