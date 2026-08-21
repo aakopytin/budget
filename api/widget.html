@@ -763,10 +763,10 @@
           if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
           if (incAmt > 0 && isInc) data[ci].incFact += incAmt;
           if (incAmt > 0 && !isInc) rejectedIncCats[catName] = (rejectedIncCats[catName] || 0) + incAmt;
-          if (expAmt > 0 && isExp) {
-            data[ci].expFact += expAmt;  // весь isExpense-факт (включая внебюджетные типа Кирова)
+          if (expAmt && isExp) {
+            data[ci].expFact += expAmt;  // весь isExpense-факт, включая сторно (отрицательные)
             if (budgetedCatsByYM[tYM] && budgetedCatsByYM[tYM][catName])
-              data[ci].expFactBud += expAmt;  // только статьи, присутствующие в acc=36
+              data[ci].expFactBud += expAmt;
             if (data[ci].isCurrent && projName)
               expFactCurByProj[projName] = (expFactCurByProj[projName] || 0) + expAmt;
           }
@@ -1371,8 +1371,8 @@
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;font-weight:600;color:'
           + (isExp ? '#dc2626' : '#15803d') + '">' 
           + (isExp ? '- ' : '+ ') + fmtFull(amt) + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + fmtFull(v.net) + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + fmtFull(v.vat) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + (isExp ? '- ' : '+ ') + fmtFull(v.net) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + (isExp ? '- ' : '+ ') + fmtFull(v.vat) + '</td>'
         + '</tr>';
     }).join('');
 
