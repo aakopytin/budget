@@ -871,9 +871,12 @@
     });
 
     // ── Шаг 5c: фактический НДС из plsItems cat=3144 по plan_money_id внебюджета ──
-    var ebPlanIds = {};
+    var ebPlanIds = {}, ebExpPlanIds = {};
     (planItems || []).forEach(function(item) {
-      if (item.org_account_id === 150 && item.id) ebPlanIds[item.id] = true;
+      if (item.org_account_id === 150 && item.id) {
+        ebPlanIds[item.id] = true;
+        if (item.type === 40) ebExpPlanIds[item.id] = true;  // только расходные EB-позиции
+      }
     });
     // paidPmIds — план-пункты с фактическим платежом (из txns)
     var paidPmIds = {};
@@ -914,10 +917,11 @@
       vfEbVatAdj += (item.total || 0) * rate;
     });
     // vfEbExpAdj: замена плановой валовой суммы на фактическую (для _expOst)
+    // Только расходные EB-позиции (type=40); EB-приходы не влияют на ожидаемые расходы
     var ebActualGross = 0;
     txns.forEach(function(tx) {
       var pmId = tx.plan_money_id;
-      if (!pmId || !ebPlanIds[pmId]) return;
+      if (!pmId || !ebExpPlanIds[pmId]) return;
       var dt = tx.date || '';
       if (today && dt > today) return;
       var catName = catMap[tx.category_id] || '';
@@ -927,7 +931,7 @@
     });
     var ebPlanGrossForPaid = 0;
     (planItems || []).forEach(function(item) {
-      if (item.org_account_id === 150 && paidPmIds[item.id])
+      if (item.org_account_id === 150 && item.type === 40 && paidPmIds[item.id])
         ebPlanGrossForPaid += item.total || 0;
     });
     var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
