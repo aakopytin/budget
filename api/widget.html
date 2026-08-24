@@ -168,6 +168,7 @@
         catName === 'Перевод между счетами (списание)') return null;
     if (ZERO_RATE_CATS[catName]) return 'zero';
     var l = catName.toLowerCase();
+    if (l.indexOf('без ндс') >= 0) return 'zero';
     if (/^смр/.test(l))      return 'smr';
     if (/^материал/.test(l)) return 'mat';
     if (l === 'проектирование-изыскание' || l.indexOf('изыскан') >= 0 ||
@@ -840,6 +841,7 @@
       if (isE) {
         var t = getExpCatType(catName);
         var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
+        if (OXR_PIDS[item.project_id] && offSubcat(catName) === 'po') rOut = 0;
         tgt.expPlan    += val;
         tgt.vatOutPlan += Math.round(val * rOut);
       }
