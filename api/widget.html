@@ -1783,7 +1783,7 @@
             + '<td colspan="10" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>'
             + '</tr>';
         }
-        var reserveDiff = sdPrev ? sdFmt(sd.reserve - sdPrev.reserve) : null;
+        var reserveDiff = sdPrev ? sdFmt(sdPrev.reserve - sd.reserve) : null;
         return '<tr style="background:#1e3a5f">'
           + '<td colspan="15" style="padding:3px 6px;font-size:9px;font-weight:700;color:#a8c4e0;letter-spacing:0.08em;text-transform:uppercase">ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ · тыс. руб.</td>'
           + '</tr>'
@@ -1800,7 +1800,7 @@
           + sdRow('Ожидаемые займы',        sdFmt(sd.finOst),    sdPrev ? sdFmt(sdPrev.finOst)    : null, null)
           + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null, null)
           + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null, null)
-          + sdRow('Резерв на выплаты',      sdFmt(sd.reserve),   sdPrev ? sdFmt(sdPrev.reserve)   : null, reserveDiff, '#fefce8')
+          + sdRow('Резерв на выплаты',      sdFmt(-sd.reserve),  sdPrev ? sdFmt(-sdPrev.reserve)  : null, reserveDiff, '#fefce8')
           + '<tr style="background:#f0fdf4">'
           + '<td colspan="2" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
           + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"><span style="color:#9ca3af">0</span></td>'
@@ -2070,7 +2070,7 @@
 
       // База: конец предыдущего месяца — фиксируется на весь текущий месяц (localStorage)
       // v3: EB-позиции исключены из расчёта прошлого месяца
-      var _baseKey = 'sdBase_v3_' + yr + '_' + (mo < 10 ? '0' : '') + mo;
+      var _baseKey = 'sdBase_v4_' + yr + '_' + (mo < 10 ? '0' : '') + mo;
       var _sdPrev = null;
       try { _sdPrev = JSON.parse(localStorage.getItem(_baseKey) || 'null'); } catch(e) {}
       if (!_sdPrev) {
