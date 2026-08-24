@@ -850,7 +850,7 @@
     // ── Шаг 5b: план — Внебюджетный лимит (org_account_id=150) ──────────
     (planItems || []).forEach(function(item) {
       if (item.org_account_id !== 150) return;
-      if (item.type !== 40) return;  // только расходы
+      if (item.type !== 40 && item.type !== 30) return;  // расходы и доходы
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -866,10 +866,18 @@
         }
       }
       if (!tgt) return;
-      var t = getExpCatType(catName);
-      var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
-      tgt.expPlan    += val;
-      tgt.vatOutPlan += Math.round(val * rOut);
+      if (item.type === 40) {  // расходы
+        var t = getExpCatType(catName);
+        var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
+        tgt.expPlan    += val;
+        tgt.vatOutPlan += Math.round(val * rOut);
+      } else {  // доходы (type=30)
+        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
+        tgt.incPlan    += val;
+        if (!zeroIncCats[catName]) {
+          tgt.vatInPlan += Math.round(val * 22 / 122);
+        }
+      }
     });
 
     // ── Шаг 5c: фактический НДС из plsItems cat=3144 по plan_money_id внебюджета ──
@@ -1049,7 +1057,7 @@
       + row('Ожидаемые займы',        fK(sd.finOst),           '', false)
       + row('Ожидаемый текущий НДС',  fK(sd.vatFact),          '', false)
       + row('Ожидаемый плановый НДС', fK(sd.vatPlan),          '', false)
-      + row('Изменение резерва',      fK(sd.reserve),          '#fefce8', false)
+      + row('Изменение резерва',      fK(-sd.reserve),         '#fefce8', false)
       + row('<strong>Планируемый доход</strong>', '<strong>' + fK(planned) + '</strong>', '#f0fdf4', true)
       + '</table></div>';
   }
@@ -1327,7 +1335,7 @@
       if (item.org_account_id !== 150) return false;
       var iy = parseInt((item.plan_paid_date || '').substring(0, 4));
       var im = parseInt((item.plan_paid_date || '').substring(5, 7));
-      return iy === curYear && im === curMonth;
+      return (iy > curYear) || (iy === curYear && im >= curMonth);
     });
     if (!items.length) return '';
 
