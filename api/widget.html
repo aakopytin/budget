@@ -2068,12 +2068,10 @@
       var _vF      = -(vf.vfFactVatRes  || 0);
       var _vP_raw  = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
 
-      // База: конец предыдущего месяца — фиксируется на весь текущий месяц (localStorage)
-      // v3: EB-позиции исключены из расчёта прошлого месяца
-      var _baseKey = 'sdBase_v4_' + yr + '_' + (mo < 10 ? '0' : '') + mo;
+      // База: конец предыдущего месяца — всегда считается заново из API-данных,
+      // кеш не используется, чтобы все пользователи видели одинаковые значения.
       var _sdPrev = null;
-      try { _sdPrev = JSON.parse(localStorage.getItem(_baseKey) || 'null'); } catch(e) {}
-      if (!_sdPrev) {
+      (function() {
         var _prevMonthEnd = (function() {
           var d = new Date(today); d.setDate(1); d.setDate(0);
           return d.toISOString().slice(0,10);
@@ -2090,7 +2088,6 @@
             var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
             var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
             var pl = type === 'inc' ? d.bi_plan : d.be_plan;
-            // EB-позиции исключены: только бюджетный остаток
             tot += (b === 0 || !pl) ? 0 : b - pf;
           });
           return tot;
@@ -2115,8 +2112,7 @@
           vatPlan:     _pVatPlan,
           reserve:     -(_pCashBal + _pIncOst - _pExpOst + _pFinOst + _pVatFact + _pVatPlan)
         };
-        try { localStorage.setItem(_baseKey, JSON.stringify(_sdPrev)); } catch(e) {}
-      }
+      })();
 
       // Ожидаемый плановый НДС = полный прогноз из calcVatForecast (включая EB-доходы и расходы).
       // Используем _vP_raw напрямую — он уже включает vatInPlan от EB-доходов и vatOutPlan от EB-расходов,
