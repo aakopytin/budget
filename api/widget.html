@@ -908,10 +908,21 @@
       var dt = tx.date || '';
       if (!today || dt <= today) paidPmIds[pmId] = true;
     });
-    // ebPmVatMap — реальный НДС из PLS cat=3144 (выделенный НДС из платежей)
+    // txIdToPmId — фолбэк: tx.id → plan_money_id для ВБ-транзакций
+    // Нужен, т.к. PLS 3147 иногда содержит только reference_id (без plan_money_id)
+    var txIdToPmId = {};
+    txns.forEach(function(tx) {
+      if (!tx.plan_money_id || !ebPlanIds[tx.plan_money_id]) return;
+      txIdToPmId[tx.id] = tx.plan_money_id;
+    });
+    // ebPmVatMap — реальный НДС из PLS cat=3144/3147 по ВБ-позициям
     var ebPmVatMap = {}, vfEbVatAdj = 0;
     (plsItems || []).forEach(function(p) {
       var pmId = p.plan_money_id;
+      // Фолбэк через reference_id → транзакция → plan_money_id
+      if (!pmId || !ebPlanIds[pmId]) {
+        if (p.reference_id && txIdToPmId[p.reference_id]) pmId = txIdToPmId[p.reference_id];
+      }
       if (!pmId || !ebPlanIds[pmId]) return;
       var dt = p.date || '';
       if (today && dt > today) return;
