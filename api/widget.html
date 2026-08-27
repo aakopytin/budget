@@ -958,8 +958,8 @@
         col.vatIn = col.vatInPlan > 0 ? Math.max(col.vatInFact, col.vatInPlan) : col.vatInFact;
         var remExp  = Math.max(0, col.expPlan - col.expFact);  // остаток плана по всем фактическим (как в верхней таблице)
         col.exp     = col.expFact + remExp;
-        var remRate = col.expPlan > 0 ? col.vatOutPlan / col.expPlan : 0;
-        col.vatOut  = col.vatOutFact + Math.round(remExp * remRate);
+        // Симметрично vatIn: max(fact, plan) — не меняется при вводе новых расходов, пока факт < плана
+        col.vatOut  = col.vatOutPlan > 0 ? Math.max(col.vatOutFact, col.vatOutPlan) : col.vatOutFact;
       } else {
         col.inc    = col.incPlan;
         col.exp    = col.expPlan;
