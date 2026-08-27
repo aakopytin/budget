@@ -946,6 +946,28 @@
     });
     var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
 
+    // ── Шаг 5d: коррекция vatOutPlan для оплаченных ВБ-позиций ────────────
+    // Шаг 5b добавил НДС по оценочной ставке (effRates). Если фактический НДС
+    // (ebPmVatMap, из PLS 3144) отличается — корректируем vatOutPlan на разницу.
+    (planItems || []).forEach(function(item) {
+      if (item.org_account_id !== 150 || item.type !== 40) return;
+      if (!paidPmIds[item.id]) return;  // только оплаченные
+      var dt = item.plan_paid_date || '';
+      if (dt.length < 7) return;
+      var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var tgt = null;
+      if (pYM >= dalYM) { tgt = dal; } else {
+        for (var ci = 0; ci < 9; ci++) { if (cols[ci].ym === pYM) { tgt = data[ci]; break; } }
+      }
+      if (!tgt) return;
+      var catName = catMap[item.category_id] || '';
+      var t = getExpCatType(catName);
+      var rOut    = (t && t !== null) ? (effRates[t] || 0) : 0;
+      var vatEst  = Math.round((item.total || 0) * rOut);  // план по эффективной ставке
+      var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
+      tgt.vatOutPlan += (vatReal - vatEst);                // корректируем план на разницу
+    });
+
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
     data.forEach(function(col) {
       if (col.isPast) {
