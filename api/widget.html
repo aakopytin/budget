@@ -856,7 +856,19 @@
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       var val     = item.total || 0;
       var catName = catMap[item.category_id] || '';
-      if (LOAN_CATS[catName]) return;
+      // VAT_REFUND_CATS: LOAN_CATS-статьи с возможным НДС (возвраты депозитов и т.п.)
+      // Для них добавляем только vatInPlan (оценка), но НЕ incPlan.
+      var VAT_REFUND_CATS = {'Возврат ДС. за заказы': 1};
+      if (LOAN_CATS[catName]) {
+        if (VAT_REFUND_CATS[catName] && item.type === 30) {
+          var tgtR = null;
+          if (pYM >= dalYM) { tgtR = dal; } else {
+            for (var ri = 0; ri < 9; ri++) { if (cols[ri].ym === pYM) { tgtR = data[ri]; break; } }
+          }
+          if (tgtR) tgtR.vatInPlan += Math.round(val * 22 / 122);
+        }
+        return;
+      }
       var tgt = null;
       if (pYM >= dalYM) {
         tgt = dal;
@@ -971,8 +983,11 @@
         var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
         tgt.vatOutPlan += (vatReal - vatEst);
       } else if (item.type === 30) {  // доходы: корректируем vatInPlan
-        // LOAN_CATS и _zeroIncCats пропущены в шаге 5b → vatEst = 0
-        var vatEst  = (LOAN_CATS[catName] || _zeroIncCats[catName]) ? 0 : Math.round((item.total || 0) * 22 / 122);
+        // VAT_REFUND_CATS: шаг 5b добавил 22/122 → используем ту же оценку
+        // Остальные LOAN_CATS и _zeroIncCats: шаг 5b пропустил → vatEst = 0
+        var _vatRefundCats = {'Возврат ДС. за заказы': 1};
+        var vatEst  = (_vatRefundCats[catName] || (!LOAN_CATS[catName] && !_zeroIncCats[catName]))
+          ? Math.round((item.total || 0) * 22 / 122) : 0;
         var vatReal = -(ebPmVatMap[item.id] || 0);           // 3147 хранится отрицательным
         tgt.vatInPlan += (vatReal - vatEst);
       }
