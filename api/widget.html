@@ -946,11 +946,13 @@
     });
     var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
 
-    // ── Шаг 5d: коррекция vatOutPlan для оплаченных ВБ-позиций ────────────
-    // Шаг 5b добавил НДС по оценочной ставке (effRates). Если фактический НДС
-    // (ebPmVatMap, из PLS 3144) отличается — корректируем vatOutPlan на разницу.
+    // ── Шаг 5d: коррекция vatOutPlan / vatInPlan для оплаченных ВБ-позиций ─
+    // Шаг 5b добавил НДС по оценочной ставке. Если фактический НДС отличается —
+    // корректируем план на разницу (расходы: PLS 3144; доходы: PLS 3147).
+    // В ebPmVatMap: type=40 → положительное (3144); type=30 → отрицательное (3147).
+    var _zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
     (planItems || []).forEach(function(item) {
-      if (item.org_account_id !== 150 || item.type !== 40) return;
+      if (item.org_account_id !== 150) return;
       if (!paidPmIds[item.id]) return;  // только оплаченные
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
@@ -961,11 +963,17 @@
       }
       if (!tgt) return;
       var catName = catMap[item.category_id] || '';
-      var t = getExpCatType(catName);
-      var rOut    = (t && t !== null) ? (effRates[t] || 0) : 0;
-      var vatEst  = Math.round((item.total || 0) * rOut);  // план по эффективной ставке
-      var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
-      tgt.vatOutPlan += (vatReal - vatEst);                // корректируем план на разницу
+      if (item.type === 40) {  // расходы: корректируем vatOutPlan
+        var t = getExpCatType(catName);
+        var rOut   = (t && t !== null) ? (effRates[t] || 0) : 0;
+        var vatEst = Math.round((item.total || 0) * rOut);
+        var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
+        tgt.vatOutPlan += (vatReal - vatEst);
+      } else if (item.type === 30) {  // доходы: корректируем vatInPlan
+        var vatEst  = _zeroIncCats[catName] ? 0 : Math.round((item.total || 0) * 22 / 122);
+        var vatReal = -(ebPmVatMap[item.id] || 0);           // 3147 хранится отрицательным
+        tgt.vatInPlan += (vatReal - vatEst);
+      }
     });
 
     // ── Шаг 6: итоговые значения — факт / факт+остаток / план ────────────
