@@ -1407,12 +1407,6 @@
 
     function ebVat(item) {
       var amt = item.total || 0;
-      // Оплачен — берём реальный НДС из транзакций cat 3157/3158 (может быть 0)
-      if (paidPmIds[item.id]) {
-        var vat = Math.abs(Math.round(ebPmVatMap[item.id] || 0));
-        return { net: amt - vat, vat: vat };
-      }
-      // Не оплачен — расчётная оценка по эффективной ставке
       var catName = catMap[item.category_id] || '';
       var rate;
       if (item.type === 40) {
@@ -1422,13 +1416,21 @@
         var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
         rate = zeroIncCats[catName] ? 0 : 22 / 122;
       }
+      // Оплачен: берём фактический НДС из PLS 3144/3147 если есть,
+      // иначе — расчётная ставка (PLS 3144 = уплата в бюджет, не НДС поставщика)
+      if (paidPmIds[item.id] && ebPmVatMap[item.id]) {
+        var vat = Math.abs(Math.round(ebPmVatMap[item.id]));
+        return { net: amt - vat, vat: vat };
+      }
       var vat = Math.round(amt * rate);
       return { net: amt - vat, vat: vat };
     }
 
     var totAmt = 0, totNet = 0, totVat = 0;
         var rows = items.map(function(item) {
-      var dt = item.plan_paid_date || '';
+      // Для оплаченных — фактическая дата платежа; для неоплаченных — плановая
+      var dt = (paidPmIds[item.id] && item.paid_date && item.paid_date !== '0000-00-00')
+        ? item.paid_date : (item.plan_paid_date || '');
       var dateStr = dt.length >= 10
         ? dt.slice(8, 10) + '.' + dt.slice(5, 7) + '.' + dt.slice(0, 4) : dt;
       var cat  = catMap[item.category_id] || '';
