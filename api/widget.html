@@ -718,7 +718,8 @@
       return {
         inc: 0, exp: 0, vatIn: 0, vatOut: 0,
         incFact: 0, expFact: 0, expFactBud: 0, vatInFact: 0, vatOutFact: 0,
-        incPlan: 0, expPlan: 0, vatInPlan: 0, vatOutPlan: 0
+        incPlan: 0, expPlan: 0, vatInPlan: 0, vatOutPlan: 0,
+        vatInByProj: {}, vatOutByProj: {}
       };
     }
     var data = cols.map(function(c) {
@@ -787,10 +788,13 @@
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var pn = PID_MAP[p.project_id] || 'Прочие';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;
-          data[ci].vatInFact += parseFloat(p.income) || 0;
+          var amt4a = parseFloat(p.income) || 0;
+          data[ci].vatInFact += amt4a;
+          data[ci].vatInByProj[pn] = (data[ci].vatInByProj[pn] || 0) + amt4a;
           break;
         }
       }
@@ -803,10 +807,13 @@
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var pn = PID_MAP[p.project_id] || 'Прочие';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
-          data[ci].vatOutFact += parseFloat(p.outcome) || 0;
+          var amt4b = parseFloat(p.outcome) || 0;
+          data[ci].vatOutFact += amt4b;
+          data[ci].vatOutByProj[pn] = (data[ci].vatOutByProj[pn] || 0) + amt4b;
           break;
         }
       }
@@ -1118,12 +1125,19 @@
 
     // Факт = сумма по прошедшим и текущему месяцам
     var factInc = 0, factVatIn = 0, factExp = 0, factVatOut = 0;
+    var factVatInByProj = {}, factVatOutByProj = {};
     data.forEach(function(c) {
       if (c.isPast || c.isCurrent) {
         factInc    += c.incFact;
         factVatIn  += c.vatInFact;
         factExp    += c.expFact;
         factVatOut += c.vatOutFact;
+        Object.keys(c.vatInByProj).forEach(function(pn) {
+          factVatInByProj[pn] = (factVatInByProj[pn] || 0) + c.vatInByProj[pn];
+        });
+        Object.keys(c.vatOutByProj).forEach(function(pn) {
+          factVatOutByProj[pn] = (factVatOutByProj[pn] || 0) + c.vatOutByProj[pn];
+        });
       }
     });
 
@@ -1231,6 +1245,33 @@
       row += '<td style="' + iSt + '">' + fv(itogoVal) + '</td>';
       row += '</tr>';
       return row;
+    }
+
+    // Строка разбивки НДС по проекту (только факт; план по проектам не ведётся)
+    function projSubRow(projName, byProjFn, factByProj) {
+      var factVal = factByProj[projName] || 0;
+      if (!factVal) return '';
+      var row = '<tr>';
+      var ls = 'padding:1px 5px 1px 16px;font-size:10px;border-bottom:1px solid #f8f8f8;color:#78716c;white-space:normal;width:90px;max-width:90px';
+      row += '<td style="' + ls + '">· ' + projName + '</td>';
+      data.forEach(function(c, ci) {
+        var bg = colBg(c);
+        var bl = (ci % 3 === 0) ? ';' + BL : '';
+        var val = (c.isPast || c.isCurrent) ? (byProjFn(c)[projName] || 0) : 0;
+        var st = 'padding:1px 5px;text-align:right;font-size:10px;white-space:nowrap;border-bottom:1px solid #f8f8f8;color:#92400e' + (bg ? ';' + bg : '') + bl;
+        row += '<td style="' + st + '">' + fv(val) + '</td>';
+      });
+      var nd = '<span style="color:#ccc">—</span>';
+      var dSt = 'padding:1px 5px;text-align:right;font-size:10px;white-space:nowrap;border-bottom:1px solid #f8f8f8;color:#92400e;' + BL;
+      row += '<td style="' + dSt + '">' + nd + '</td>';
+      row += '<td style="' + dSt + ';background:#f3f4f6">' + fv(factVal) + '</td>';
+      row += '<td style="' + dSt + '">' + nd + '</td>';
+      row += '<td style="' + dSt + ';font-weight:600">' + fv(factVal) + '</td>';
+      row += '</tr>';
+      return row;
+    }
+    function projSubRows(byProjFn, factByProj) {
+      return PROJECTS.map(function(pn) { return projSubRow(pn, byProjFn, factByProj); }).join('');
     }
 
     function resRow(label, fnV, factV, progV, itogoV, bg) {
@@ -1362,8 +1403,10 @@
       + h1 + h2
       + dataRow('Поступления',       function(c){return c.inc;},    undefined, factInc,    progInc,    itogoInc)
       + dataRow('НДС с поступлений', function(c){return c.vatIn;},  '#92400e', factVatIn,  progVatIn,  itogoVatIn)
+      + projSubRows(function(c){return c.vatInByProj;}, factVatInByProj)
       + dataRow('Выплаты',           function(c){return c.exp;},    undefined, factExp,    progExp,    itogoExp)
       + dataRow('НДС с выплат',      function(c){return c.vatOut;}, '#92400e', factVatOut, progVatOut, itogoVatOut)
+      + projSubRows(function(c){return c.vatOutByProj;}, factVatOutByProj)
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
       + adjRow('Корректировка НДС', vatAdj)
