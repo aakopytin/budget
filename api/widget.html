@@ -785,11 +785,12 @@
     });
 
     // ── Шаг 4a: vatInFact = НДС к вычету из PLS cat=3144 (нетто = outcome − income)
-    // Идентично расчёту в Виджете НДС: cat=3144 = НДС входящий (по каждой транзакции).
+    // Алгоритм Виджета НДС (группа): cat=3144 = НДС входящий по каждой транзакции.
     // Квартальный расчётный платёж (project_id=27) исключаем — он не является вычетом.
+    // Знаковая конвенция: vatIn > vatOut → к возмещению (vfFactVatRes > 0, _vF < 0 → положит. число в карточке).
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
-      if (p.project_id === TR_PID) return;  // исключаем квартальный платёж (project_id=27)
+      if (p.project_id === TR_PID) return;
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -806,12 +807,12 @@
       }
     });
 
-    // ── Шаг 4b: vatOutFact = НДС начисленный из PLS cat=1000 (income)
-    // Идентично расчёту в Виджете НДС: cat=1000 = НДС исходящий с выручки.
+    // ── Шаг 4b: vatOutFact = НДС начисленный из PLS cat=1000 (income = output VAT)
+    // Алгоритм Виджета НДС (группа): cat=1000 = НДС исходящий с выручки.
     // Переводы ВСИП↔ТТ (project_id=27) исключаем — они взаимно компенсируются в группе.
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 1000) return;
-      if (p.project_id === TR_PID) return;  // исключаем переводы ВСИП↔ТТ
+      if (p.project_id === TR_PID) return;
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -1097,7 +1098,7 @@
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
     // vatAdj (project_id=36 плановые корректировки) НЕ включаем в factVatRes —
     // чтобы _vF совпадало с расчётом Виджета НДС (только PLS 3144 + 1000, без плановых корр.)
-    var vfFactVatRes  = vfFVI - vfFVO;   // >0 = к возмещению, <0 = к уплате (без vatAdj — совпадает с Виджетом НДС)
+    var vfFactVatRes  = vfFVI - vfFVO;   // <0 = к возмещению, >0 = к уплате; _vF = -(vfFactVatRes) → >0 = к возмещению в карточке
     var vfItogoVatRes = vfTVI - vfTVO;  // итого план без vatAdj — чтобы _vP = -progVatRes (нижняя таблица)
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
@@ -1464,7 +1465,7 @@
       + '<table style="border-collapse:collapse;width:100%;table-layout:fixed">'
       + h1 + h2
       + dataRow('Поступления',       function(c){return c.inc;},    undefined, factInc,    progInc,    itogoInc)
-      + dataRow('НДС к вычету',       function(c){return c.vatIn;},  '#92400e', factVatIn,  progVatIn,  itogoVatIn)
+      + dataRow('НДС к вычету',      function(c){return c.vatIn;},  '#92400e', factVatIn,  progVatIn,  itogoVatIn)
       + projSubRows(function(c){return c.vatInByProj;}, function(c){return c.vatInPlanByProj;}, factVatInByProj, progVatInByProj)
       + dataRow('Выплаты',           function(c){return c.exp;},    undefined, factExp,    progExp,    itogoExp)
       + dataRow('НДС начисленный',   function(c){return c.vatOut;}, '#92400e', factVatOut, progVatOut, itogoVatOut)
@@ -1472,10 +1473,12 @@
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
       + adjRow('Корректировка НДС', vatAdj)
-      + vatSplitRow('Итого НДС к получению', function(c){return c.vatIn - c.vatOut;},
-                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, true)
-      + vatSplitRow('Итого НДС к уплате',    function(c){return c.vatIn - c.vatOut;},
-                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  false)
+      + vatSplitRow('Итого НДС к получению',
+                   function(c){ return (c.isPast || c.isCurrent) ? (c.vatOut - c.vatIn) : (c.vatIn - c.vatOut); },
+                   -factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, true)
+      + vatSplitRow('Итого НДС к уплате',
+                   function(c){ return (c.isPast || c.isCurrent) ? (c.vatOut - c.vatIn) : (c.vatIn - c.vatOut); },
+                   -factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  false)
       + '</table>'
       + rateTable
       + '</div>';
