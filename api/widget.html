@@ -38,6 +38,7 @@
   table { width: 100%; border-collapse: collapse; font-size: 11px; }
   th, td { white-space: nowrap; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -50,6 +51,7 @@
     <span id="status">&#9679; инициализация...</span>
     <input type="date" id="sel-date" style="font-size:11px;border:1px solid #d1d5db;border-radius:4px;padding:2px 6px;color:#374151;background:#fff;cursor:pointer" title="Дата отчёта">
     <button id="refresh-btn" title="Обновить">&#8635;</button>
+    <button id="export-btn" title="Выгрузить в Excel" style="font-size:11px;padding:3px 10px;border:1px solid #16a34a;border-radius:4px;background:#f0fdf4;color:#15803d;cursor:pointer;font-weight:600" onclick="exportWidgetToExcel()">&#8595; Excel</button>
   </div>
 </div>
 
@@ -2366,6 +2368,61 @@
 
   load();
 })();
+
+// ── Экспорт таблиц виджета в Excel ──────────────────────────────────────────
+function exportWidgetToExcel() {
+  if (typeof XLSX === 'undefined') { alert('XLSX не загружен'); return; }
+  var contentEl = document.getElementById('content');
+  var tables = contentEl ? contentEl.querySelectorAll('table') : [];
+  if (!tables.length) { alert('Нет данных для экспорта'); return; }
+
+  // Парсим текст ячейки: "+ 1 018" → 1018, "− 500" → -500, "—" → ''
+  // Числа в таблице в тысячах рублей × 1000 → рубли
+  function parseCell(raw) {
+    var txt = (raw || '').trim();
+    if (!txt || txt === '—' || txt === '-') return '';
+    var sign = 1;
+    // Detect leading minus or "−" (Unicode minus U+2212)
+    if (/^[\-−]/.test(txt)) { sign = -1; txt = txt.slice(1).trim(); }
+    else if (txt.charAt(0) === '+') { txt = txt.slice(1).trim(); }
+    // Remove all kinds of spaces used as thousands separators
+    txt = txt.replace(/[    ]/g, '').replace(',', '.');
+    if (txt === '' || txt === '0') return 0;
+    var n = parseFloat(txt);
+    if (isNaN(n)) return raw.trim();   // non-numeric text — return as string
+    return sign * n * 1000;            // ×1000: таблица показывает тыс.руб.
+  }
+
+  var wb = XLSX.utils.book_new();
+  var sheetNames = ['Бюджет', 'НДС прогноз'];
+
+  tables.forEach(function(tbl, idx) {
+    var rows = tbl.querySelectorAll('tr');
+    var aoa = [];
+    rows.forEach(function(tr) {
+      var cells = tr.querySelectorAll('th, td');
+      var row = [];
+      cells.forEach(function(td) {
+        row.push(parseCell(td.textContent));
+      });
+      aoa.push(row);
+    });
+
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    // Apply number format to numeric cells
+    Object.keys(ws).forEach(function(addr) {
+      if (addr[0] === '!') return;
+      var cell = ws[addr];
+      if (typeof cell.v === 'number') { cell.t = 'n'; cell.z = '#,##0'; delete cell.w; }
+    });
+
+    var name = sheetNames[idx] || ('Лист' + (idx + 1));
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+
+  var dateStr = (document.getElementById('sel-date').value || new Date().toISOString().slice(0,10)).slice(0,7);
+  XLSX.writeFile(wb, 'Бюджет_' + dateStr + '.xlsx');
+}
 </script>
 </body>
 </html>
