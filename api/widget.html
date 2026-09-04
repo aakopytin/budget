@@ -2201,7 +2201,8 @@
       })();
       // ── END DEBUG ──
 
-      var _vF      = -(vf.vfFactVatRes  || 0);
+      // vfFactVatRes > 0 = к возмещению (refunds > payments) — благоприятно, должно быть положительным в карточке.
+      var _vF      = (vf.vfFactVatRes  || 0);
       var _vP_raw  = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
 
       // База: конец предыдущего месяца — всегда считается заново из API-данных,
@@ -2236,7 +2237,7 @@
         var _pIncOst  = _sumOstP('inc');
         var _pExpOst  = _sumOstP('exp');
         var _pFinOst  = _skInOP - _skOutOP;
-        var _pVatFact = -(_vfP.vfFactVatRes  || 0);
+        var _pVatFact = (_vfP.vfFactVatRes  || 0);
         var _pVatPlan = -((_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0));
         _sdPrev = {
           dateStr:     _prevMonthEnd.slice(8,10) + '.' + _prevMonthEnd.slice(5,7) + '.' + _prevMonthEnd.slice(0,4),
