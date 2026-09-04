@@ -1097,8 +1097,8 @@
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
     // vatAdj (project_id=36 плановые корректировки) НЕ включаем в factVatRes —
     // чтобы _vF совпадало с расчётом Виджета НДС (только PLS 3144 + 1000, без плановых корр.)
-    var vfFactVatRes  = vfFVI - vfFVO;            // >0 = к возмещению, <0 = к уплате (без vatAdj)
-    var vfItogoVatRes = vfTVI - vfTVO - vatAdj;   // итого план — с корректировкой
+    var vfFactVatRes  = vfFVI - vfFVO;   // >0 = к возмещению, <0 = к уплате (без vatAdj — совпадает с Виджетом НДС)
+    var vfItogoVatRes = vfTVI - vfTVO;  // итого план без vatAdj — чтобы _vP = -progVatRes (нижняя таблица)
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
