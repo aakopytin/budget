@@ -981,8 +981,10 @@
     var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
 
     // ── Шаг 5d: коррекция vatOutPlan / vatInPlan для оплаченных ВБ-позиций ─
-    // Шаг 5b добавил НДС по оценочной ставке. Если фактический НДС отличается —
-    // корректируем план на разницу (расходы: PLS 3144; доходы: PLS 3147).
+    // Шаг 5a добавил расчётный НДС по эффективной ставке (vatEst) в vatOutPlan/vatInPlan.
+    // Если фактический НДС из PLS 3144/3147 уже известен — заменяем оценку фактом.
+    // Если PLS ещё нет (например, та же дата, квартальная уплата не произошла) —
+    // оставляем оценку как есть, чтобы резерв менялся на НЕТТО, а не на БРУТТО.
     // В ebPmVatMap: type=40 → положительное (3144); type=30 → отрицательное (3147).
     var _zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
     (planItems || []).forEach(function(item) {
@@ -998,20 +1000,24 @@
       if (!tgt) return;
       var catName = catMap[item.category_id] || '';
       if (item.type === 40) {  // расходы: корректируем vatOutPlan
-        // LOAN_CATS пропущены в шаге 5b → vatEst = 0
         var t = LOAN_CATS[catName] ? null : getExpCatType(catName);
         var rOut   = (t && t !== null) ? (effRates[t] || 0) : 0;
         var vatEst = Math.round((item.total || 0) * rOut);
-        var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
-        tgt.vatOutPlan += (vatReal - vatEst);
+        var vatReal_raw = ebPmVatMap[item.id];               // undefined если PLS нет
+        if (vatReal_raw !== undefined) {
+          // PLS 3144 есть — заменяем расчётную оценку фактическим НДС
+          tgt.vatOutPlan += (vatReal_raw - vatEst);
+        }
+        // Если PLS нет — оценка Шага 5a остаётся: резерв = нетто (брутто − НДС)
       } else if (item.type === 30) {  // доходы: корректируем vatInPlan
-        // VAT_REFUND_CATS: шаг 5b добавил 22/122 → используем ту же оценку
-        // Остальные LOAN_CATS и _zeroIncCats: шаг 5b пропустил → vatEst = 0
         var _vatRefundCats = {'Возврат ДС. за заказы': 1};
         var vatEst  = (_vatRefundCats[catName] || (!LOAN_CATS[catName] && !_zeroIncCats[catName]))
           ? Math.round((item.total || 0) * 22 / 122) : 0;
-        var vatReal = -(ebPmVatMap[item.id] || 0);           // 3147 хранится отрицательным
-        tgt.vatInPlan += (vatReal - vatEst);
+        var vatReal_raw = ebPmVatMap[item.id];               // undefined если PLS нет
+        if (vatReal_raw !== undefined) {
+          var vatReal = -vatReal_raw;                        // 3147 хранится отрицательным
+          tgt.vatInPlan += (vatReal - vatEst);
+        }
       }
     });
 
