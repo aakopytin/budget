@@ -1071,8 +1071,11 @@
       if (c.isPast || c.isCurrent) { vfFVI += c.vatInFact; vfFVO += c.vatOutFact; }
     });
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
-    var vfFactVatRes  = vfFVI - vfFVO - vatAdj;   // >0 = к уплате, <0 = к возмещению
-    var vfItogoVatRes = vfTVI - vfTVO - vatAdj;
+    // vatAdj (project_id=36) отображается отдельной строкой "Корректировка НДС" — не включаем в Факт.
+    // Знак: vfFVI - vfFVO > 0 = к возмещению (refunds > payments), < 0 = к уплате.
+    var vfFactVatRes  = vfFVI - vfFVO;
+    // vfItogoVatRes: планово-прогнозный итог тоже без vatAdj — он влияет на Прогноз отдельно.
+    var vfItogoVatRes = vfTVI - vfTVO;
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
@@ -1424,7 +1427,9 @@
       + '</table></div></div>';
 
     var vatAdj      = vf.vatAdj || 0;  // нетто Корректировка НДС (project_id=36, текущий квартал)
-    var factVatRes  = factVatIn  - factVatOut - vatAdj;
+    // vatAdj выводится отдельной строкой adjRow — не включаем в factVatRes.
+    // factVatRes > 0 = к возмещению (PLS 3147 refunds > PLS 3144 payments).
+    var factVatRes  = factVatIn  - factVatOut;
     var progVatRes  = progVatIn  - progVatOut;
     var itogoVatRes = itogoVatIn - itogoVatOut - vatAdj;
     var factRes     = (factInc  - factVatIn)  - (factExp  - factVatOut);
@@ -1445,10 +1450,13 @@
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
       + adjRow('Корректировка НДС', vatAdj)
+      // Факт: factVatRes > 0 = к возмещению (PLS 3147 refunds > PLS 3144 payments).
+      // Инвертируем знак factVatRes, чтобы отображение совпало с isPositive=false (показывает < 0).
+      // Прогноз и итого — plan-конвенция (vatIn=начисленный, vatOut=вычет): знак не инвертируем.
       + vatSplitRow('Итого НДС к получению', function(c){return c.vatIn - c.vatOut;},
-                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, true)
+                   -factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, true)
       + vatSplitRow('Итого НДС к уплате',    function(c){return c.vatIn - c.vatOut;},
-                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  false)
+                   -factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  false)
       + '</table>'
       + rateTable
       + '</div>';
