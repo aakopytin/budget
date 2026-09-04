@@ -1013,8 +1013,13 @@
         if (vatReal_raw !== undefined) {
           // PLS 3144 есть — заменяем расчётную оценку фактическим НДС
           tgt.vatOutPlan += (vatReal_raw - vatEst);
+        } else {
+          // PLS ещё нет — для оплаченных транзакций используем фактическую ставку (не effRates):
+          // SMR → 5/105 (упрощённая), всё остальное облагаемое → 22/122
+          var txRate = (t === 'smr') ? 5/105 : (t && t !== 'zero') ? 22/122 : 0;
+          var vatTx  = Math.round((item.total || 0) * txRate);
+          tgt.vatOutPlan += (vatTx - vatEst);
         }
-        // Если PLS нет — оценка Шага 5a остаётся: резерв = нетто (брутто − НДС)
       } else if (item.type === 30) {  // доходы: корректируем vatInPlan
         var _vatRefundCats = {'Возврат ДС. за заказы': 1};
         var vatEst  = (_vatRefundCats[catName] || (!LOAN_CATS[catName] && !_zeroIncCats[catName]))
@@ -1078,10 +1083,17 @@
     var vatAdj = vatAdjInc - vatAdjExp;  // положительное = чистый возврат НДС (снижает к уплате)
 
     // Агрегаты Факт/ИТОГО по НДС — для сводной карточки
+    // vfFVI/vfFVO = "Ожидаемый текущий НДС":
+    //   прошедшие месяцы → PLS-факт (3144/3147), т.к. квартальные платежи уже проведены
+    //   текущий месяц → лучшая оценка (col.vatIn/vatOut = max(PLS-факт, план от транзакций)),
+    //   т.к. PLS 3144 за текущий квартал появится только после квартальной уплаты
     var vfFVI = 0, vfFVO = 0, vfTVI = 0, vfTVO = 0;
     data.forEach(function(c) {
       vfTVI += c.vatIn; vfTVO += c.vatOut;
-      if (c.isPast || c.isCurrent) { vfFVI += c.vatInFact; vfFVO += c.vatOutFact; }
+      if (c.isPast || c.isCurrent) {
+        vfFVI += c.isCurrent ? c.vatIn  : c.vatInFact;
+        vfFVO += c.isCurrent ? c.vatOut : c.vatOutFact;
+      }
     });
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
     var vfFactVatRes  = vfFVI - vfFVO - vatAdj;   // >0 = к уплате, <0 = к возмещению
