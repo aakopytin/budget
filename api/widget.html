@@ -933,7 +933,8 @@
       if (!today || dt <= today) paidPmIds[pmId] = true;
     });
     // ebPmVatMap — реальный НДС из PLS cat=3144/3147 по ВБ-позициям
-    var ebPmVatMap = {}, vfEbVatAdj = 0;
+    // vfEbVatPaid — только оплаченные ВБ-платежи (PLS 3144/3147), используется в формуле планового НДС
+    var ebPmVatMap = {}, vfEbVatAdj = 0, vfEbVatPaid = 0;
     (plsItems || []).forEach(function(p) {
       var pmId = p.plan_money_id;
       if (!pmId || !ebPlanIds[pmId]) return;
@@ -942,10 +943,12 @@
       if (p.category_id === 3144) {
         var v = parseFloat(p.outcome) || 0;
         vfEbVatAdj += v;
+        vfEbVatPaid += v;
         ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) + v;
       } else if (p.category_id === 3147) {
         var v = parseFloat(p.income) || 0;
         vfEbVatAdj -= v;
+        vfEbVatPaid -= v;
         ebPmVatMap[pmId] = (ebPmVatMap[pmId] || 0) - v;
       }
     });
@@ -1098,7 +1101,7 @@
             vatAdj: vatAdj,
             vfFactVatRes: vfFactVatRes,
             vfItogoVatRes: vfItogoVatRes,
-            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, vfEbExpAdj: vfEbExpAdj,
+            vfEbVatAdj: vfEbVatAdj, vfEbVatPaid: vfEbVatPaid, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, vfEbExpAdj: vfEbExpAdj,
             expFactCurByProj: expFactCurByProj};
   }
 
@@ -2284,7 +2287,8 @@
       // ── END DEBUG ──
 
       var _vF      = -(vf.vfFactVatRes  || 0);
-      var _vP_raw  = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
+      // Ожидаемый плановый НДС = -Ожидаемый текущий НДС - НДС от оплаченных внебюджетных платежей (PLS 3144/3147)
+      var _vP_raw  = -_vF - (vf.vfEbVatPaid || 0);
 
       // База: конец предыдущего месяца — всегда считается заново из API-данных,
       // кеш не используется, чтобы все пользователи видели одинаковые значения.
@@ -2319,7 +2323,7 @@
         var _pExpOst  = _sumOstP('exp');
         var _pFinOst  = _skInOP - _skOutOP;
         var _pVatFact = -(_vfP.vfFactVatRes  || 0);
-        var _pVatPlan = -((_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0));
+        var _pVatPlan = -_pVatFact - (_vfP.vfEbVatPaid || 0);
         _sdPrev = {
           dateStr:     _prevMonthEnd.slice(8,10) + '.' + _prevMonthEnd.slice(5,7) + '.' + _prevMonthEnd.slice(0,4),
           cashBalance: _pCashBal,
@@ -2332,9 +2336,8 @@
         };
       })();
 
-      // Ожидаемый плановый НДС = полный прогноз из calcVatForecast (включая EB-доходы и расходы).
-      // Используем _vP_raw напрямую — он уже включает vatInPlan от EB-доходов и vatOutPlan от EB-расходов,
-      // чтобы значение совпадало с таблицей НДС ПРОГНОЗ.
+      // Ожидаемый плановый НДС = -Ожидаемый текущий НДС - НДС от внебюджетных платежей.
+      // Для сравнения: нижняя таблица "Прогноз" = progVatRes = progVatIn - progVatOut.
       var _vP = _vP_raw;
 
       var _sd = {
