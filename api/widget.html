@@ -1015,8 +1015,8 @@
           tgt.vatOutPlan += (vatReal_raw - vatEst);
         } else {
           // PLS ещё нет — для оплаченных транзакций используем фактическую ставку (не effRates):
-          // SMR → 5/105 (упрощённая), всё остальное облагаемое → 22/122
-          var txRate = (t === 'smr') ? 5/105 : (t && t !== 'zero') ? 22/122 : 0;
+          // SMR → 5/105 (упрощённая), bg (гарантии) и zero → 0, остальные облагаемые → 22/122
+          var txRate = (t === 'smr') ? 5/105 : (t && t !== 'zero' && t !== 'bg') ? 22/122 : 0;
           var vatTx  = Math.round((item.total || 0) * txRate);
           tgt.vatOutPlan += (vatTx - vatEst);
         }
