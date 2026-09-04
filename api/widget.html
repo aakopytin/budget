@@ -2157,12 +2157,16 @@
           if (item.type === 40) pm[proj].be_eb_unpaid = (pm[proj].be_eb_unpaid || 0) + val;
           if (item.type === 30) pm[proj].bi_eb_unpaid = (pm[proj].bi_eb_unpaid || 0) + val;
         });
-        // eCur_eb / iCur_eb: фактические ВБ-платежи до today (не давят на be_plan)
+        // eCur_eb / iCur_eb: ВБ-платежи ТЕКУЩЕГО месяца (совпадают с a.eCur/a.iCur)
+        // Важно: фильтр yr===yr && mo===mo, иначе прошлые месяцы уйдут в минус
         txns.forEach(function(tx) {
           var pmId = tx.plan_money_id;
           if (!pmId) return;
           var dt = tx.date || '';
           if (today && dt > today) return;
+          var txYr = parseInt(dt.substring(0, 4));
+          var txMo = parseInt(dt.substring(5, 7));
+          if (txYr !== yr || txMo !== mo) return;  // только текущий месяц
           var proj = PID_MAP[tx.project_id];
           if (!proj || !pm[proj]) return;
           var catName = catMap[tx.category_id] || '';
