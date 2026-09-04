@@ -186,13 +186,9 @@
   }
 
   // Ставки по умолчанию — применяются если нет фактических PLS-данных для данного типа
-  // Ставки по умолчанию применяются, когда нет PLS-данных за предыдущий квартал.
-  // Для VAT-облагаемых категорий используем базовую ставку 22/122, чтобы
-  // ожидаемый НДС по ВБ-платежам текущего квартала не обнулялся.
-  // smr/mat переопределяются жёсткими ставками ниже; bg (гарантии) — освобождён.
   var DEFAULT_EFF_RATES = {
-    smr: 0, mat: 0, design: 22/122, bg: 0,
-    ar: 22/122, lz: 22/122, buh: 22/122, proj_other: 22/122, zero: 0
+    smr: 0, mat: 0, design: 0, bg: 0,
+    ar: 0, lz: 0, buh: 0, proj_other: 0, zero: 0
   };
 
   function isIncome(t) { return !!INC_TYPES[t]; }
@@ -1013,13 +1009,8 @@
         if (vatReal_raw !== undefined) {
           // PLS 3144 есть — заменяем расчётную оценку фактическим НДС
           tgt.vatOutPlan += (vatReal_raw - vatEst);
-        } else {
-          // PLS ещё нет — для оплаченных транзакций используем фактическую ставку (не effRates):
-          // SMR → 5/105 (упрощённая), bg (гарантии) и zero → 0, остальные облагаемые → 22/122
-          var txRate = (t === 'smr') ? 5/105 : (t && t !== 'zero' && t !== 'bg') ? 22/122 : 0;
-          var vatTx  = Math.round((item.total || 0) * txRate);
-          tgt.vatOutPlan += (vatTx - vatEst);
         }
+        // Нет PLS — оставляем vatEst без изменений
       } else if (item.type === 30) {  // доходы: корректируем vatInPlan
         var _vatRefundCats = {'Возврат ДС. за заказы': 1};
         var vatEst  = (_vatRefundCats[catName] || (!LOAN_CATS[catName] && !_zeroIncCats[catName]))
@@ -1091,8 +1082,8 @@
     data.forEach(function(c) {
       vfTVI += c.vatIn; vfTVO += c.vatOut;
       if (c.isPast || c.isCurrent) {
-        vfFVI += c.isCurrent ? c.vatIn  : c.vatInFact;
-        vfFVO += c.isCurrent ? c.vatOut : c.vatOutFact;
+        vfFVI += c.vatInFact;
+        vfFVO += c.vatOutFact;
       }
     });
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
