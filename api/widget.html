@@ -2126,27 +2126,94 @@
       var finPlan     = planResult.finPlan;
       var vf = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, today);
 
+      // ── ВБ-корректировки для резерва: be_eb_unpaid, eCur_eb ──────────────
+      // paidPmIds не возвращается из calcVatForecast, строим повторно (быстро).
+      (function() {
+        var _ebIds = {}, _ebExpIds = {}, _ebIncIds = {};
+        (planItems || []).forEach(function(item) {
+          if (item.org_account_id === 150 && item.id) {
+            _ebIds[item.id] = true;
+            if (item.type === 40) _ebExpIds[item.id] = true;
+            if (item.type === 30) _ebIncIds[item.id]  = true;
+          }
+        });
+        var _paid = {};
+        txns.forEach(function(tx) {
+          var pmId = tx.plan_money_id;
+          if (!pmId || !_ebIds[pmId]) return;
+          var dt = tx.date || '';
+          if (!today || dt <= today) _paid[pmId] = true;
+        });
+        // be_eb_unpaid / bi_eb_unpaid: неоплаченный ВБ тек. и будущих месяцев
+        (planItems || []).forEach(function(item) {
+          if (item.org_account_id !== 150 || !item.id) return;
+          if (_paid[item.id]) return;
+          var proj = PID_MAP[item.project_id];
+          if (!proj || !pm[proj]) return;
+          var iy = parseInt((item.plan_paid_date || '').substring(0, 4));
+          var im = parseInt((item.plan_paid_date || '').substring(5, 7));
+          if (iy < yr || (iy === yr && im < mo)) return;
+          var val = item.total || 0;
+          if (item.type === 40) pm[proj].be_eb_unpaid = (pm[proj].be_eb_unpaid || 0) + val;
+          if (item.type === 30) pm[proj].bi_eb_unpaid = (pm[proj].bi_eb_unpaid || 0) + val;
+        });
+        // eCur_eb / iCur_eb: фактические ВБ-платежи до today (не давят на be_plan)
+        txns.forEach(function(tx) {
+          var pmId = tx.plan_money_id;
+          if (!pmId) return;
+          var dt = tx.date || '';
+          if (today && dt > today) return;
+          var proj = PID_MAP[tx.project_id];
+          if (!proj || !pm[proj]) return;
+          var catName = catMap[tx.category_id] || '';
+          if (LOAN_CATS[catName]) return;
+          if (tx.category_id === 3144 || tx.category_id === 3147) return;
+          if (_ebExpIds[pmId]) {
+            var expAmt = (parseFloat(tx.outcome) || 0) - (parseFloat(tx.income) || 0);
+            if (expAmt > 0) pm[proj].eCur_eb = (pm[proj].eCur_eb || 0) + expAmt;
+          }
+          if (_ebIncIds[pmId]) {
+            var incAmt = (parseFloat(tx.income) || 0) - (parseFloat(tx.outcome) || 0);
+            if (incAmt > 0) pm[proj].iCur_eb = (pm[proj].iCur_eb || 0) + incAmt;
+          }
+        });
+      })();
+
       // ── Сводная карточка: вычисление данных ─────────────────────────────
       var _acc = factResult.acc;
       var _fin = factResult.fin;
 
-      // Остаток бюджета по доходам/расходам (логика totals())
+      // Остаток бюджета по доходам/расходам (новая логика: ВБ — отдельно от бюджета)
+      // Для расходов: max(0, be_plan − eCur_non_eb) + be_eb_unpaid
+      //   eCur_non_eb = eCur минус фактические ВБ-платежи (они не давят на бюджет)
+      //   be_eb_unpaid = неоплаченный ВБ тек./будущих мес. (учитывается сверх бюджета)
+      // При оплате ВБ: be_eb_unpaid↓, eCur_eb↑ → eCur_non_eb не меняется → expOst↓=plan,
+      //   cash↓=actual → если actual=plan резерв стабилен; разница (actual−plan) → резерв.
+      // При создании неоплаченного ВБ: be_eb_unpaid↑ → expOst↑ → резерв ухудшается на нетто.
       function _sumOst(type) {
         var tot = 0;
         PROJECTS.forEach(function(p) {
           var d = pm[p], a = _acc[p];
-          var b = type === 'inc'
-            ? a.i25 + (a.i26 - a.iCur) + d.bi_plan
-            : a.e25 + (a.e26 - a.eCur) + d.be_plan;
-          var planPart = type === 'inc' ? d.bi_plan : d.be_plan;
-          var eb   = type === 'inc' ? (d.bi_eb || 0) : (d.be_eb || 0);
-          var pFact = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
-          tot += (b + eb === 0 || (!planPart && !eb)) ? 0 : Math.max(0, b + eb - pFact);
+          if (type === 'exp') {
+            var eCurEb   = d.eCur_eb || 0;
+            var eCurBgt  = (a.eCur || 0) - eCurEb;  // не-ВБ факт
+            var planRem  = Math.max(0, (d.be_plan || 0) - eCurBgt);
+            var ebUnpaid = d.be_eb_unpaid || 0;
+            if (!planRem && !ebUnpaid) return;
+            tot += planRem + ebUnpaid;
+          } else {
+            var iCurEb   = d.iCur_eb || 0;
+            var iCurBgt  = (a.iCur || 0) - iCurEb;
+            var planRem  = Math.max(0, (d.bi_plan || 0) - iCurBgt);
+            var ebUnpaid = d.bi_eb_unpaid || 0;
+            if (!planRem && !ebUnpaid) return;
+            tot += planRem + ebUnpaid;
+          }
         });
         return tot;
       }
       var _incOst = _sumOst('inc');
-      var _expOst = _sumOst('exp') + (vf ? (vf.vfEbExpAdj || 0) : 0);
+      var _expOst = _sumOst('exp');  // vfEbExpAdj убран: логика перенесена в be_eb_unpaid/eCur_eb
 
       // finNetOst (аналог buildTable)
       var _fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]},skOut:{hE:0,plan:[0,0,0,0,0,0]}};
@@ -2168,30 +2235,30 @@
 
       var _cashBal = factResult.vEnd + factResult.tEnd;
 
-      // ── DEBUG: компоненты expOst и cashBal (удалить после диагностики) ──
+      // ── DEBUG: компоненты expOst и cashBal ──
       (function() {
-        var _dbSumOst = _sumOst('exp');
-        var _dbEbAdj  = vf ? (vf.vfEbExpAdj || 0) : 0;
-        var _dbExpOst = _dbSumOst + _dbEbAdj;
-        var _dbProj   = {};
+        var _dbProj = {};
         PROJECTS.forEach(function(p) {
           var d = pm[p], a = _acc[p];
-          var bePlan = d.be_plan || 0, beEb = d.be_eb || 0, eCur = a.eCur || 0;
-          var e26 = a.e26 || 0, e25 = a.e25 || 0;
-          var planPart = bePlan, eb = beEb;
-          var b = e25 + (e26 - eCur) + bePlan;
-          var pFact = e25 + e26;
-          var contrib = (b + eb === 0 || (!planPart && !eb)) ? 0 : b + eb - pFact;
-          _dbProj[p] = { bePlan: bePlan, beEb: beEb, eCur: eCur, e26: e26, contrib: Math.round(contrib) };
+          var eCurEb  = d.eCur_eb || 0;
+          var eCurBgt = (a.eCur || 0) - eCurEb;
+          var planRem = Math.max(0, (d.be_plan || 0) - eCurBgt);
+          var ebUnpaid = d.be_eb_unpaid || 0;
+          _dbProj[p] = {
+            bePlan:    Math.round(d.be_plan || 0),
+            beEbUnpd:  Math.round(ebUnpaid),
+            eCur:      Math.round(a.eCur || 0),
+            eCurEb:    Math.round(eCurEb),
+            planRem:   Math.round(planRem),
+            contrib:   Math.round(planRem + ebUnpaid)
+          };
         });
         console.log('DEBUG expOst', {
-          sumOst:     Math.round(_dbSumOst),
-          vfEbExpAdj: Math.round(_dbEbAdj),
-          expOst:     Math.round(_dbExpOst),
-          cashBal:    Math.round(_cashBal),
-          vEnd:       Math.round(factResult.vEnd),
-          tEnd:       Math.round(factResult.tEnd),
-          projects:   _dbProj
+          expOst:  Math.round(_expOst),
+          cashBal: Math.round(_cashBal),
+          vEnd:    Math.round(factResult.vEnd),
+          tEnd:    Math.round(factResult.tEnd),
+          projects: _dbProj
         });
       })();
       // ── END DEBUG ──
