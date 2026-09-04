@@ -186,9 +186,13 @@
   }
 
   // Ставки по умолчанию — применяются если нет фактических PLS-данных для данного типа
+  // Ставки по умолчанию применяются, когда нет PLS-данных за предыдущий квартал.
+  // Для VAT-облагаемых категорий используем базовую ставку 22/122, чтобы
+  // ожидаемый НДС по ВБ-платежам текущего квартала не обнулялся.
+  // smr/mat переопределяются жёсткими ставками ниже; bg (гарантии) — освобождён.
   var DEFAULT_EFF_RATES = {
-    smr: 0, mat: 0, design: 0, bg: 0,
-    ar: 0, lz: 0, buh: 0, proj_other: 0, zero: 0
+    smr: 0, mat: 0, design: 22/122, bg: 0,
+    ar: 22/122, lz: 22/122, buh: 22/122, proj_other: 22/122, zero: 0
   };
 
   function isIncome(t) { return !!INC_TYPES[t]; }
@@ -1124,7 +1128,8 @@
         + '<td style="padding:5px 8px;text-align:right;' + btS + 'white-space:nowrap">' + valHtml + '</td>'
         + '</tr>';
     };
-    var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan - sd.reserve;
+    // reserve = -(cashBal + incOst - expOst + finOst + vatFact + vatPlan) → сумма строк = 0
+    var planned = sd.cashBalance + sd.incOst - sd.expOst + sd.finOst + sd.vatFact + sd.vatPlan + sd.reserve;
     return '<div style="margin-bottom:20px">'
       + '<div style="font-size:10px;font-weight:700;color:#6b7280;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:6px">Прогноз движения денежных средств</div>'
       + '<table style="' + CS + '">'
@@ -1134,7 +1139,7 @@
       + row('Ожидаемые займы',        fK(sd.finOst),           '', false)
       + row('Ожидаемый текущий НДС',  fK(sd.vatFact),          '', false)
       + row('Ожидаемый плановый НДС', fK(sd.vatPlan),          '', false)
-      + row('Изменение резерва',      fK(-sd.reserve),         '#fefce8', false)
+      + row('Изменение резерва',      fK(sd.reserve),          '#fefce8', false)
       + row('<strong>Планируемый доход</strong>', '<strong>' + fK(planned) + '</strong>', '#f0fdf4', true)
       + '</table></div>';
   }
@@ -1922,7 +1927,7 @@
             + '<td colspan="10" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>'
             + '</tr>';
         }
-        var reserveDiff = sdPrev ? sdFmt(sdPrev.reserve - sd.reserve) : null;
+        var reserveDiff = sdPrev ? sdFmt(sd.reserve - sdPrev.reserve) : null;
         return '<tr style="background:#1e3a5f">'
           + '<td colspan="15" style="padding:3px 6px;font-size:9px;font-weight:700;color:#a8c4e0;letter-spacing:0.08em;text-transform:uppercase">ПРОГНОЗ ДВИЖЕНИЯ ДЕНЕЖНЫХ СРЕДСТВ · тыс. руб.</td>'
           + '</tr>'
@@ -1939,7 +1944,7 @@
           + sdRow('Ожидаемые займы',        sdFmt(sd.finOst),    sdPrev ? sdFmt(sdPrev.finOst)    : null, null)
           + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null, null)
           + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null, null)
-          + sdRow('Резерв на выплаты',      sdFmt(-sd.reserve),  sdPrev ? sdFmt(-sdPrev.reserve)  : null, reserveDiff, '#fefce8')
+          + sdRow('Резерв на выплаты',      sdFmt(sd.reserve),   sdPrev ? sdFmt(sdPrev.reserve)   : null, reserveDiff, '#fefce8')
           + '<tr style="background:#f0fdf4">'
           + '<td colspan="2" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
           + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"><span style="color:#9ca3af">0</span></td>'
