@@ -786,11 +786,11 @@
 
     // ── Шаг 4a: vatInFact = НДС к вычету из PLS cat=3144 (нетто = outcome − income)
     // Алгоритм Виджета НДС (группа): cat=3144 = НДС входящий по каждой транзакции.
-    // Квартальный расчётный платёж (project_id=27) исключаем — он не является вычетом.
+    // project_id=27 НЕ исключаем — это PLS-аллокации НДС, а не денежные трансферы.
+    // Без этого фильтра сумма совпадает с Виджетом НДС (nds.html).
     // Знаковая конвенция: vatIn > vatOut → к возмещению (vfFactVatRes > 0, _vF < 0 → положит. число в карточке).
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
-      if (p.project_id === TR_PID) return;
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
