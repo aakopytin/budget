@@ -1095,8 +1095,10 @@
       }
     });
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
-    var vfFactVatRes  = vfFVI - vfFVO - vatAdj;   // >0 = к уплате, <0 = к возмещению
-    var vfItogoVatRes = vfTVI - vfTVO - vatAdj;
+    // vatAdj (project_id=36 плановые корректировки) НЕ включаем в factVatRes —
+    // чтобы _vF совпадало с расчётом Виджета НДС (только PLS 3144 + 1000, без плановых корр.)
+    var vfFactVatRes  = vfFVI - vfFVO;            // >0 = к возмещению, <0 = к уплате (без vatAdj)
+    var vfItogoVatRes = vfTVI - vfTVO - vatAdj;   // итого план — с корректировкой
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
@@ -1449,7 +1451,7 @@
       + '</table></div></div>';
 
     var vatAdj      = vf.vatAdj || 0;  // нетто Корректировка НДС (project_id=36, текущий квартал)
-    var factVatRes  = factVatIn  - factVatOut - vatAdj;
+    var factVatRes  = factVatIn  - factVatOut;           // без vatAdj — чтобы совпадать с Виджетом НДС
     var progVatRes  = progVatIn  - progVatOut;
     var itogoVatRes = itogoVatIn - itogoVatOut - vatAdj;
     var factRes     = (factInc  - factVatIn)  - (factExp  - factVatOut);
@@ -1462,10 +1464,10 @@
       + '<table style="border-collapse:collapse;width:100%;table-layout:fixed">'
       + h1 + h2
       + dataRow('Поступления',       function(c){return c.inc;},    undefined, factInc,    progInc,    itogoInc)
-      + dataRow('НДС с поступлений', function(c){return c.vatIn;},  '#92400e', factVatIn,  progVatIn,  itogoVatIn)
+      + dataRow('НДС к вычету',       function(c){return c.vatIn;},  '#92400e', factVatIn,  progVatIn,  itogoVatIn)
       + projSubRows(function(c){return c.vatInByProj;}, function(c){return c.vatInPlanByProj;}, factVatInByProj, progVatInByProj)
       + dataRow('Выплаты',           function(c){return c.exp;},    undefined, factExp,    progExp,    itogoExp)
-      + dataRow('НДС с выплат',      function(c){return c.vatOut;}, '#92400e', factVatOut, progVatOut, itogoVatOut)
+      + dataRow('НДС начисленный',   function(c){return c.vatOut;}, '#92400e', factVatOut, progVatOut, itogoVatOut)
       + projSubRows(function(c){return c.vatOutByProj;}, function(c){return c.vatOutPlanByProj;}, factVatOutByProj, progVatOutByProj)
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
