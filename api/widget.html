@@ -784,11 +784,12 @@
       }
     });
 
-    // ── Шаг 4a: vatInFact из PLS category_id=3147 (Налог - НДС, income)
-    // Клиентские транзакции (project_id ≠ TR_PID=27) — НДС хранится в PLS отдельной строкой.
+    // ── Шаг 4a: vatInFact = НДС к вычету из PLS cat=3144 (нетто = outcome − income)
+    // Идентично расчёту в Виджете НДС: cat=3144 = НДС входящий (по каждой транзакции).
+    // Квартальный расчётный платёж (project_id=27) исключаем — он не является вычетом.
     (plsItems || []).forEach(function(p) {
-      if (p.category_id !== 3147) return;
-      if (p.project_id === TR_PID) return;  // исключаем внутренние переводы ВСИП↔ТТ
+      if (p.category_id !== 3144) return;
+      if (p.project_id === TR_PID) return;  // исключаем квартальный платёж (project_id=27)
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
@@ -796,7 +797,8 @@
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;
-          var amt4a = parseFloat(p.income) || 0;
+          var amt4a = (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);  // нетто
+          if (!amt4a) break;
           data[ci].vatInFact += amt4a;
           data[ci].vatInByProj[pn] = (data[ci].vatInByProj[pn] || 0) + amt4a;
           break;
@@ -804,18 +806,21 @@
       }
     });
 
-    // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, ВСИП + ТТ, без трансферов)
+    // ── Шаг 4b: vatOutFact = НДС начисленный из PLS cat=1000 (income)
+    // Идентично расчёту в Виджете НДС: cat=1000 = НДС исходящий с выручки.
+    // Переводы ВСИП↔ТТ (project_id=27) исключаем — они взаимно компенсируются в группе.
     (plsItems || []).forEach(function(p) {
-      if (p.category_id !== 3144) return;
-      if (p.project_id === TR_PID) return;  // исключаем трансферы ВСИП↔ТТ
+      if (p.category_id !== 1000) return;
+      if (p.project_id === TR_PID) return;  // исключаем переводы ВСИП↔ТТ
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       var pn = PID_MAP[p.project_id] || 'Прочие';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
-          var amt4b = parseFloat(p.outcome) || 0;
+          if (data[ci].isCurrent && today && dt > today) break;
+          var amt4b = parseFloat(p.income) || 0;
+          if (!amt4b) break;
           data[ci].vatOutFact += amt4b;
           data[ci].vatOutByProj[pn] = (data[ci].vatOutByProj[pn] || 0) + amt4b;
           break;
@@ -2287,8 +2292,9 @@
       // ── END DEBUG ──
 
       var _vF      = -(vf.vfFactVatRes  || 0);
-      // Ожидаемый плановый НДС = -Ожидаемый текущий НДС - НДС от оплаченных внебюджетных платежей (PLS 3144/3147)
-      var _vP_raw  = -_vF - (vf.vfEbVatPaid || 0);
+      // Ожидаемый плановый НДС = значение из нижней таблицы "Прогноз НДС" (= -progVatRes = -(vfItogoVatRes - vfFactVatRes))
+      // Инкрементальный алгоритм: Δ(план НДС) = -Δ(текущий НДС) - НДС оплаченных ВБ-платежей за период
+      var _vP_raw  = -((vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0));
 
       // База: конец предыдущего месяца — всегда считается заново из API-данных,
       // кеш не используется, чтобы все пользователи видели одинаковые значения.
@@ -2323,7 +2329,7 @@
         var _pExpOst  = _sumOstP('exp');
         var _pFinOst  = _skInOP - _skOutOP;
         var _pVatFact = -(_vfP.vfFactVatRes  || 0);
-        var _pVatPlan = -_pVatFact - (_vfP.vfEbVatPaid || 0);
+        var _pVatPlan = -((_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0));
         _sdPrev = {
           dateStr:     _prevMonthEnd.slice(8,10) + '.' + _prevMonthEnd.slice(5,7) + '.' + _prevMonthEnd.slice(0,4),
           cashBalance: _pCashBal,
