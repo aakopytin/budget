@@ -793,7 +793,8 @@
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;
-          var amt4a = parseFloat(p.income) || 0;
+          var amt4a = (parseFloat(p.income) || 0) - (parseFloat(p.outcome) || 0);  // нетто, как в ДДС
+          if (!amt4a) break;
           data[ci].vatInFact += amt4a;
           data[ci].vatInByProj[pn] = (data[ci].vatInByProj[pn] || 0) + amt4a;
           break;
@@ -812,7 +813,8 @@
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
-          var amt4b = parseFloat(p.outcome) || 0;
+          var amt4b = (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);  // нетто, как в ДДС
+          if (!amt4b) break;
           data[ci].vatOutFact += amt4b;
           data[ci].vatOutByProj[pn] = (data[ci].vatOutByProj[pn] || 0) + amt4b;
           break;
@@ -1074,7 +1076,7 @@
     // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
     // Результат > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
     var vfFactVatRes  = -vfFVI + vfFVO + vatAdj;
-    var vfItogoVatRes = vfTVI - vfTVO;
+    var vfItogoVatRes = -vfTVI + vfTVO + vatAdj;
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
@@ -1177,10 +1179,24 @@
     var itogoExp    = factExp    + progExp;
     var itogoVatOut = factVatOut + progVatOut;
 
-    // Прогноз НДС по проектам = план будущих месяцев + Далее
+    // Прогноз НДС по проектам: прошлые/текущие = план−факт; будущие = план; + Далее
     var progVatInByProj = {}, progVatOutByProj = {};
     data.forEach(function(c) {
-      if (!c.isPast && !c.isCurrent) {
+      if (c.isPast || c.isCurrent) {
+        // Корректировка: план−факт по каждому проекту
+        var mp = {};
+        Object.keys(c.vatInPlanByProj).forEach(function(pn) { mp[pn] = 1; });
+        Object.keys(c.vatInByProj).forEach(function(pn) { mp[pn] = 1; });
+        Object.keys(mp).forEach(function(pn) {
+          progVatInByProj[pn] = (progVatInByProj[pn] || 0) + (c.vatInPlanByProj[pn] || 0) - (c.vatInByProj[pn] || 0);
+        });
+        var mp2 = {};
+        Object.keys(c.vatOutPlanByProj).forEach(function(pn) { mp2[pn] = 1; });
+        Object.keys(c.vatOutByProj).forEach(function(pn) { mp2[pn] = 1; });
+        Object.keys(mp2).forEach(function(pn) {
+          progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + (c.vatOutPlanByProj[pn] || 0) - (c.vatOutByProj[pn] || 0);
+        });
+      } else {
         Object.keys(c.vatInPlanByProj).forEach(function(pn) {
           progVatInByProj[pn] = (progVatInByProj[pn] || 0) + c.vatInPlanByProj[pn];
         });
@@ -1429,8 +1445,8 @@
     // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
     // Результат > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
     var factVatRes  = -factVatIn + factVatOut + vatAdj;
-    var progVatRes  = progVatIn  - progVatOut;
-    var itogoVatRes = itogoVatIn - itogoVatOut - vatAdj;
+    var progVatRes  = -progVatIn  + progVatOut;
+    var itogoVatRes = -itogoVatIn + itogoVatOut + vatAdj;
     var factRes     = (factInc  - factVatIn)  - (factExp  - factVatOut);
     var progRes     = (progInc  - progVatIn)  - (progExp  - progVatOut);
     var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
@@ -1449,10 +1465,11 @@
       + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
                factRes, progRes, itogoRes)
       + adjRow('Корректировка НДС', vatAdj)
-      // factVatRes = -НДС_поступлений + НДС_выплат + Корректировка. > 0 = к возмещению (зелёный).
-      + vatSplitRow('Итого НДС к получению', function(c){return c.vatIn - c.vatOut;},
+      // Формула везде: -НДС_поступлений + НДС_выплат (+ Корректировка в Факт/ИТОГО).
+      // > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
+      + vatSplitRow('Итого НДС к получению', function(c){return -c.vatIn + c.vatOut;},
                    factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  true)
-      + vatSplitRow('Итого НДС к уплате',    function(c){return c.vatIn - c.vatOut;},
+      + vatSplitRow('Итого НДС к уплате',    function(c){return -c.vatIn + c.vatOut;},
                    factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, false)
       + '</table>'
       + rateTable
