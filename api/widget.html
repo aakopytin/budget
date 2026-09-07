@@ -602,6 +602,8 @@
       if (item.org_account_id !== 150) return;
       var proj = PID_MAP[item.project_id];
       if (!proj || !pm[proj]) return;
+      var catNameEb = (catMap && catMap[item.category_id]) || '';
+      if (SKIP[catNameEb]) return;  // категория в SKIP → транзакции тоже не войдут в eCur
       var iy  = parseInt(item.plan_paid_date.substring(0, 4));
       var im  = parseInt(item.plan_paid_date.substring(5, 7));
       var val = item.total || 0;
@@ -617,7 +619,6 @@
       }
       // Разбивка внебюджета по подкатегориям для офисных проектов
       if (OXR_PIDS[item.project_id] && isE) {
-        var catNameEb = (catMap && catMap[item.category_id]) || '';
         var subEb = offSubcat(catNameEb);
         if (offBrkPlan[subEb]) {
           if (iy > curYear || (iy === curYear && im >= curMonth)) offBrkPlan[subEb].be_eb += val;
