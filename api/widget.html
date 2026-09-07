@@ -526,7 +526,7 @@
     });
     var offBrkPlan = {};
     OFF_SUBCATS.forEach(function(s) {
-      offBrkPlan[s.code] = {be_plan:0, hE:0, hE_eb:0, plan_e:[0,0,0,0,0,0]};
+      offBrkPlan[s.code] = {be_plan:0, hE:0, hE_eb:0, be_eb:0, plan_e:[0,0,0,0,0,0]};
     });
     // Плановые поступления/выплаты займов → финансовая деятельность
     var finPlan = {
@@ -616,10 +616,13 @@
         if (isE) d.hE_eb += val;
       }
       // Разбивка внебюджета по подкатегориям для офисных проектов
-      if (OXR_PIDS[item.project_id] && isE && iy === curYear && im === curMonth) {
+      if (OXR_PIDS[item.project_id] && isE) {
         var catNameEb = (catMap && catMap[item.category_id]) || '';
         var subEb = offSubcat(catNameEb);
-        if (offBrkPlan[subEb]) offBrkPlan[subEb].hE_eb += val;
+        if (offBrkPlan[subEb]) {
+          if (iy > curYear || (iy === curYear && im >= curMonth)) offBrkPlan[subEb].be_eb += val;
+          if (iy === curYear && im === curMonth) offBrkPlan[subEb].hE_eb += val;
+        }
       }
     });
     return {pm: pm, offBrkPlan: offBrkPlan, finPlan: finPlan};
@@ -917,11 +920,16 @@
     });
 
     // ── Шаг 5c: фактический НДС из plsItems cat=3144 по plan_money_id внебюджета ──
-    var ebPlanIds = {}, ebExpPlanIds = {};
+    var ebPlanIds = {}, ebExpPlanIds = {}, ebExpPlanYM = {};
     (planItems || []).forEach(function(item) {
       if (item.org_account_id === 150 && item.id) {
         ebPlanIds[item.id] = true;
-        if (item.type === 40) ebExpPlanIds[item.id] = true;  // только расходные EB-позиции
+        if (item.type === 40) {
+          ebExpPlanIds[item.id] = true;  // только расходные EB-позиции
+          var dt = item.plan_paid_date || '';
+          if (dt.length >= 7)
+            ebExpPlanYM[item.id] = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
+        }
       }
     });
     // paidPmIds — план-пункты с фактическим платежом (из txns)
@@ -962,12 +970,14 @@
       var rate = (t && t !== null) ? (effRates[t] || 0) : 0;
       vfEbVatAdj += (item.total || 0) * rate;
     });
-    // vfEbExpAdj: замена плановой валовой суммы на фактическую (для _expOst)
-    // Только расходные EB-позиции (type=40); EB-приходы не влияют на ожидаемые расходы
+    // vfEbExpAdj: замена плановой валовой суммы на фактическую (для _expOst).
+    // Только EB-расходы (type=40) с датой плана >= curYM: прошлые месяцы уже отражены
+    // в a.e26 через обычный цикл фактических транзакций, повторная корректировка не нужна.
     var ebActualGross = 0;
     txns.forEach(function(tx) {
       var pmId = tx.plan_money_id;
       if (!pmId || !ebExpPlanIds[pmId]) return;
+      if ((ebExpPlanYM[pmId] || 0) < curYM) return;  // только текущий месяц и будущие
       var dt = tx.date || '';
       if (today && dt > today) return;
       var catName = catMap[tx.category_id] || '';
@@ -977,8 +987,10 @@
     });
     var ebPlanGrossForPaid = 0;
     (planItems || []).forEach(function(item) {
-      if (item.org_account_id === 150 && item.type === 40 && paidPmIds[item.id])
-        ebPlanGrossForPaid += item.total || 0;
+      if (item.org_account_id !== 150 || item.type !== 40 || !paidPmIds[item.id]) return;
+      var dt = item.plan_paid_date || '';
+      var pYM = dt.length >= 7 ? parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7)) : 0;
+      if (pYM >= curYM) ebPlanGrossForPaid += item.total || 0;  // только тек.месяц и будущие
     });
     var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
 
@@ -1697,8 +1709,9 @@
         var obp = offBrkPlan ? offBrkPlan[s.code] : null;
         var tot = brk.f25 + brk.f26;
         // Бюджет = факт_25 + (факт_26 - тек.мес) + план_от_тек.мес
-        var b   = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
-        var ost = (b === 0 || !obp || !obp.be_plan) ? 0 : b - tot;
+        var b    = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
+        var obEb = obp ? (obp.be_eb || 0) : 0;
+        var ost  = (b + obEb === 0 || !obp || (!obp.be_plan && !obEb)) ? 0 : b + obEb - tot;
         var hE  = obp ? obp.hE : 0;
         return '<tr>'
           + TDl('<span style="padding-left:14px">' + s.label + '</span>')
