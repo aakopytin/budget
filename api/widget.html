@@ -140,7 +140,8 @@
     'Оказание услуг': 1,
     'Возврат ДС. за заказы': 1,
     'Проценты к получению': 1,
-    'Прочий доход': 1
+    'Прочий доход': 1,
+    'Возврат депозита': 1   // ВБ-доходы: учитываются в iCur → корректно снижают _incOst
   };
 
   // Категории расходов с нулевой ставкой НДС (для планового расчёта)
@@ -386,14 +387,23 @@
       return [];
     });
     return Promise.all([req1, req2]).then(function(res) {
-      // Если req1 вернул данные — используем только его (req2 содержит те же записи,
-      // конкатенация привела бы к двойному счёту).
-      var combined = res[0].length > 0 ? res[0] : res[1];
+      // req2 (pls3144) — полный список cat=3144, включая записи ВБ-позиций (plan_money_id)
+      // которые могут отсутствовать в req1 (transaction_pls — только привязанные к транзакциям).
+      // Используем req2 для 3144 (более полный), req1 — для 3147/1000.
+      // Если req2 пустой (ошибка эндпоинта) — откатываемся на req1 целиком.
+      var from3144   = res[1];  // pls3144 endpoint: все записи cat=3144
+      var fromEntity = res[0];  // transaction_pls: 3147, 1000 (и 3144 но неполный)
+      var combined;
+      if (from3144.length > 0) {
+        // 3144 — из полного endpoint; остальные (3147, 1000) — из entity
+        var other = fromEntity.filter(function(i) { return i.category_id !== 3144; });
+        combined = from3144.concat(other);
+      } else {
+        combined = fromEntity;
+      }
       return combined.filter(function(i) {
         if (!i.date) return false;
         var iy = parseInt(i.date.substring(0, 4));
-        // 3144 = НДС к вычету (input VAT, outcome) — единственная категория в transaction_pls
-        // category_id=1000 (НДС начисленный) в transaction_pls не существует
         return (iy === curYear || iy === prevYear)
             && (i.category_id === 3144 || i.category_id === 3147 || i.category_id === 1000);
       });
