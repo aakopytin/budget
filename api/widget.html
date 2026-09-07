@@ -1499,13 +1499,17 @@
 
     function ebVat(item) {
       var amt = item.total || 0;
-      // Оплачен — берём реальный НДС из транзакций cat 3157/3158 (может быть 0)
-      if (paidPmIds[item.id]) {
-        var vat = Math.abs(Math.round(ebPmVatMap[item.id] || 0));
-        return { net: amt - vat, vat: vat };
-      }
-      // Не оплачен — расчётная оценка по эффективной ставке
       var catName = catMap[item.category_id] || '';
+      // Оплачен — берём реальный НДС из PLS cat=3144/3147.
+      // Если 0: PLS для этой позиции использует другую категорию (напр. 3157 для возвратов от поставщиков)
+      // → откатываемся к оценке по ставке.
+      if (paidPmIds[item.id]) {
+        var vatPls = Math.round(ebPmVatMap[item.id] || 0);
+        if (vatPls !== 0) {
+          return { net: amt - Math.abs(vatPls), vat: Math.abs(vatPls) };
+        }
+      }
+      // Оценка по эффективной ставке (для неоплаченных и paid без PLS-данных по НДС)
       var rate;
       if (item.type === 40) {
         var t = getExpCatType(catName);
