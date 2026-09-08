@@ -1187,19 +1187,23 @@
     // Прогноз НДС по проектам: прошлые/текущие = план−факт; будущие = план; + Далее
     var progVatInByProj = {}, progVatOutByProj = {};
     data.forEach(function(c) {
-      if (c.isPast || c.isCurrent) {
-        // Корректировка: план−факт по каждому проекту
-        var mp = {};
-        Object.keys(c.vatInPlanByProj).forEach(function(pn) { mp[pn] = 1; });
-        Object.keys(c.vatInByProj).forEach(function(pn) { mp[pn] = 1; });
-        Object.keys(mp).forEach(function(pn) {
-          progVatInByProj[pn] = (progVatInByProj[pn] || 0) + (c.vatInPlanByProj[pn] || 0) - (c.vatInByProj[pn] || 0);
+      if (c.isPast) {
+        // Прошлые месяцы: c.vatOut = c.vatOutFact → вклад скаляра = 0; разбивку не трогаем
+      } else if (c.isCurrent) {
+        // Текущий месяц: скаляр = max(0, plan−fact); зеркалим per-project
+        var mpI = {};
+        Object.keys(c.vatInPlanByProj).forEach(function(pn) { mpI[pn] = 1; });
+        Object.keys(c.vatInByProj).forEach(function(pn) { mpI[pn] = 1; });
+        Object.keys(mpI).forEach(function(pn) {
+          var d = (c.vatInPlanByProj[pn] || 0) - (c.vatInByProj[pn] || 0);
+          progVatInByProj[pn] = (progVatInByProj[pn] || 0) + Math.max(0, d);
         });
         var mp2 = {};
         Object.keys(c.vatOutPlanByProj).forEach(function(pn) { mp2[pn] = 1; });
         Object.keys(c.vatOutByProj).forEach(function(pn) { mp2[pn] = 1; });
         Object.keys(mp2).forEach(function(pn) {
-          progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + (c.vatOutPlanByProj[pn] || 0) - (c.vatOutByProj[pn] || 0);
+          var d = (c.vatOutPlanByProj[pn] || 0) - (c.vatOutByProj[pn] || 0);
+          progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + Math.max(0, d);
         });
       } else {
         Object.keys(c.vatInPlanByProj).forEach(function(pn) {
