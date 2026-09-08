@@ -79,7 +79,7 @@
     25:'Ю-Сахалинск',
     7:'Иволгинск',
     10:'Большое Болдино',
-    2:'Центр. договор',
+    2:'Прочие/ Закрытые проекты',
     18:'Центр. договор',
     19:'Центр. договор',
     29:'Центр. договор',
@@ -1509,16 +1509,12 @@
     function ebVat(item) {
       var amt = item.total || 0;
       var catName = catMap[item.category_id] || '';
-      // Оплачен — берём реальный НДС из PLS cat=3144/3147.
-      // Если 0: PLS для этой позиции использует другую категорию (напр. 3157 для возвратов от поставщиков)
-      // → откатываемся к оценке по ставке.
+      // Оплачен — берём реальный НДС из PLS cat=3144/3147 (доверяем даже если 0).
       if (paidPmIds[item.id]) {
         var vatPls = Math.round(ebPmVatMap[item.id] || 0);
-        if (vatPls !== 0) {
-          return { net: amt - Math.abs(vatPls), vat: Math.abs(vatPls) };
-        }
+        return { net: amt - Math.abs(vatPls), vat: Math.abs(vatPls) };
       }
-      // Оценка по эффективной ставке (для неоплаченных и paid без PLS-данных по НДС)
+      // Оценка по эффективной ставке (только для неоплаченных позиций)
       var rate;
       if (item.type === 40) {
         var t = getExpCatType(catName);
