@@ -889,10 +889,6 @@
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       var val     = item.total || 0;
       var catName = catMap[item.category_id] || '';
-      // ВБ-доходы LOAN_CATS: vatInPlan не добавляем — иначе pre-commit в vfTVI
-      // нейтрализует ΔvF при поступлении (ΔvF+ΔvP=0). Фактический НДС приходит
-      // через vatInFact (PLS cat=3147, Step 4a) при реальном поступлении.
-      if (LOAN_CATS[catName]) return;
       var tgt = null;
       if (pYM >= dalYM) {
         tgt = dal;
@@ -911,9 +907,10 @@
         tgt.vatOutPlan += vo5b;
         tgt.vatOutPlanByProj[pn5b] = (tgt.vatOutPlanByProj[pn5b] || 0) + vo5b;
       } else {  // доходы (type=30)
-        var _zi5b = {'Прочий доход':1,'Проценты к получению':1};
+        var _vatRefundCats5b = {'Возврат ДС. за заказы': 1};
+        var _zeroInc5b = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
         tgt.incPlan += val;
-        if (!_zi5b[catName]) {
+        if (_vatRefundCats5b[catName] || (!LOAN_CATS[catName] && !_zeroInc5b[catName])) {
           tgt.vatInPlan += Math.round(val * 22 / 122);
         }
       }
@@ -994,11 +991,9 @@
     });
     var vfEbExpAdj = ebActualGross - ebPlanGrossForPaid;
 
-    // ── Шаг 5d: коррекция vatOutPlan / vatInPlan для оплаченных ВБ-позиций ─
+    // ── Шаг 5d: коррекция vatOutPlan для оплаченных ВБ-расходов ─────────────
     // Шаг 5b добавил НДС по оценочной ставке. Если фактический НДС отличается —
-    // корректируем план на разницу (расходы: PLS 3144; доходы: PLS 3147).
-    // В ebPmVatMap: type=40 → положительное (3144); type=30 → отрицательное (3147).
-    var _zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
+    // корректируем vatOutPlan на разницу (PLS 3144).
     (planItems || []).forEach(function(item) {
       if (item.org_account_id !== 150) return;
       if (!paidPmIds[item.id]) return;  // только оплаченные
@@ -1012,20 +1007,11 @@
       if (!tgt) return;
       var catName = catMap[item.category_id] || '';
       if (item.type === 40) {  // расходы: корректируем vatOutPlan
-        // LOAN_CATS пропущены в шаге 5b → vatEst = 0
         var t = LOAN_CATS[catName] ? null : getExpCatType(catName);
         var rOut   = (t && t !== null) ? (effRates[t] || 0) : 0;
         var vatEst = Math.round((item.total || 0) * rOut);
         var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
         tgt.vatOutPlan += (vatReal - vatEst);
-      } else if (item.type === 30) {  // доходы: корректируем vatInPlan
-        // VAT_REFUND_CATS: шаг 5b добавил 22/122 → используем ту же оценку
-        // Остальные LOAN_CATS и _zeroIncCats: шаг 5b пропустил → vatEst = 0
-        var _vatRefundCats = {'Возврат ДС. за заказы': 1};
-        var vatEst  = (_vatRefundCats[catName] || (!LOAN_CATS[catName] && !_zeroIncCats[catName]))
-          ? Math.round((item.total || 0) * 22 / 122) : 0;
-        var vatReal = -(ebPmVatMap[item.id] || 0);           // 3147 хранится отрицательным
-        tgt.vatInPlan += (vatReal - vatEst);
       }
     });
 
@@ -1088,27 +1074,8 @@
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
     // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
     // Результат > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
-
-    // Корректировка ΔvP для оплаченных ВБ-доходов с НДС.
-    // Проблема: когда ВБ-доход оплачен в текущем месяце, vatInFact попадает в vfFVI (→ _vF).
-    // При этом col.vatIn текущего месяца = max(vatInFact, vatInPlan=0) = vatInFact —
-    // та же сумма, что и до оплаты через vatInPlan-оценку → ΔvfTVI=0, ΔvfFVI=+vatInFact → Δ_vP=+vatInFact (ошибка).
-    // Вычитаем vatInFact оплаченных ВБ-доходов из vfItogoVatRes, чтобы Δ_vP=0.
-    var ebIncPaidYMs = {};
-    (planItems || []).forEach(function(item) {
-      if (item.org_account_id !== 150 || item.type !== 30 || !paidPmIds[item.id]) return;
-      if (LOAN_CATS[catMap[item.category_id] || '']) return;
-      var dt = item.plan_paid_date || '';
-      if (dt.length >= 7)
-        ebIncPaidYMs[parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7))] = true;
-    });
-    var vfEbIncPaidVatFact = 0;
-    data.forEach(function(c) {
-      if (c.isCurrent && ebIncPaidYMs[c.ym]) vfEbIncPaidVatFact += c.vatInFact;
-    });
-
     var vfFactVatRes  = -vfFVI + vfFVO + vatAdj;
-    var vfItogoVatRes = -vfTVI + vfTVO + vatAdj - vfEbIncPaidVatFact;
+    var vfItogoVatRes = -vfTVI + vfTVO + vatAdj;
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
             effRates: effRates, effExpByType: effExpByType, effVatByType: effVatByType,
