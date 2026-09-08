@@ -395,9 +395,11 @@
       var fromEntity = res[0];  // transaction_pls: 3147, 1000 (и 3144 но неполный)
       var combined;
       if (from3144.length > 0) {
-        // 3144 — из полного endpoint; остальные (3147, 1000) — из entity
+        // 3144 — из полного endpoint (фильтруем только 3144, т.к. сервер возвращает все категории);
+        // остальные (3147, 1000) — из entity, чтобы не задваивать.
+        var only3144 = from3144.filter(function(i) { return i.category_id === 3144; });
         var other = fromEntity.filter(function(i) { return i.category_id !== 3144; });
-        combined = from3144.concat(other);
+        combined = only3144.concat(other);
       } else {
         combined = fromEntity;
       }
