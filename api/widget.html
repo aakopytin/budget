@@ -1013,7 +1013,11 @@
         var rOut   = (t && t !== null) ? (effRates[t] || 0) : 0;
         var vatEst = Math.round((item.total || 0) * rOut);
         var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
-        tgt.vatOutPlan += (vatReal - vatEst);
+        var vatDiff = vatReal - vatEst;
+        tgt.vatOutPlan += vatDiff;
+        // Синхронизируем разбивку по проектам: без этого sum(vatOutPlanByProj) ≠ vatOutPlan
+        var pn5d = PID_MAP[item.project_id] || 'Прочие';
+        tgt.vatOutPlanByProj[pn5d] = (tgt.vatOutPlanByProj[pn5d] || 0) + vatDiff;
       }
     });
 
