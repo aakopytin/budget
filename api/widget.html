@@ -889,19 +889,10 @@
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       var val     = item.total || 0;
       var catName = catMap[item.category_id] || '';
-      // VAT_REFUND_CATS: LOAN_CATS-статьи с возможным НДС (возвраты депозитов и т.п.)
-      // Для них добавляем только vatInPlan (оценка), но НЕ incPlan.
-      var VAT_REFUND_CATS = {'Возврат ДС. за заказы': 1};
-      if (LOAN_CATS[catName]) {
-        if (VAT_REFUND_CATS[catName] && item.type === 30) {
-          var tgtR = null;
-          if (pYM >= dalYM) { tgtR = dal; } else {
-            for (var ri = 0; ri < 9; ri++) { if (cols[ri].ym === pYM) { tgtR = data[ri]; break; } }
-          }
-          if (tgtR) tgtR.vatInPlan += Math.round(val * 22 / 122);
-        }
-        return;
-      }
+      // ВБ-доходы LOAN_CATS: vatInPlan НЕ добавляем (оценка pre-commit'ит vfTVI,
+      // нейтрализуя ΔvF при поступлении → ΔvF+ΔvP=0). Реальный НДС приходит
+      // через vatInFact (PLS cat=3147) в Step 4a при фактическом поступлении.
+      if (LOAN_CATS[catName]) return;
       var tgt = null;
       if (pYM >= dalYM) {
         tgt = dal;
@@ -920,13 +911,11 @@
         tgt.vatOutPlan += vo5b;
         tgt.vatOutPlanByProj[pn5b] = (tgt.vatOutPlanByProj[pn5b] || 0) + vo5b;
       } else {  // доходы (type=30)
-        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
-        tgt.incPlan    += val;
-        if (!zeroIncCats[catName]) {
-          var vi5b = Math.round(val * 22 / 122);
-          tgt.vatInPlan += vi5b;
-          tgt.vatInPlanByProj[pn5b] = (tgt.vatInPlanByProj[pn5b] || 0) + vi5b;
-        }
+        tgt.incPlan += val;
+        // vatInPlan для ВБ-доходов не добавляем: PLS cat=3147 не имеет plan_money_id
+        // → ebPmVatMap пуст → Step 5d не может скорректировать оценку реальным значением
+        // → pre-commit в vfTVI нейтрализует ΔvF при поступлении (ΔvF+ΔvP=0).
+        // Правильный НДС приходит через vatInFact (Step 4a) когда поступление фактическое.
       }
     });
 
@@ -1030,13 +1019,12 @@
         var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
         tgt.vatOutPlan += (vatReal - vatEst);
       } else if (item.type === 30) {  // доходы: корректируем vatInPlan
-        // VAT_REFUND_CATS: шаг 5b добавил 22/122 → используем ту же оценку
-        // Остальные LOAN_CATS и _zeroIncCats: шаг 5b пропустил → vatEst = 0
-        var _vatRefundCats = {'Возврат ДС. за заказы': 1};
-        var vatEst  = (_vatRefundCats[catName] || (!LOAN_CATS[catName] && !_zeroIncCats[catName]))
-          ? Math.round((item.total || 0) * 22 / 122) : 0;
+        // Step 5b не добавлял vatInPlan-оценку для ВБ-доходов → vatEst = 0.
+        // vatReal = реальный НДС из PLS cat=3147 (через ebPmVatMap, если есть plan_money_id).
+        // Сейчас PLS cat=3147 не имеет plan_money_id → vatReal = 0 → коррекция = 0.
+        // При будущих изменениях API (plan_money_id на cat=3147) vatReal заполнится корректно.
         var vatReal = -(ebPmVatMap[item.id] || 0);           // 3147 хранится отрицательным
-        tgt.vatInPlan += (vatReal - vatEst);
+        tgt.vatInPlan += vatReal;
       }
     });
 
