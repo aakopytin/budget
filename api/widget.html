@@ -494,6 +494,10 @@
       if ((typeName === 'Выплата кредита' || typeName === 'Выплата займа') && expAmt > 0) {
         fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
       }
+      // Процентные расходы не-офисных проектов → fin.int (офисные % уже идут в offBrk.pct)
+      if (typeName === 'Проценты к уплате' && expAmt > 0 && !OXR_PIDS[tx.project_id]) {
+        fin.int[fKey] += expAmt; if (isCur) fin.int.fCur += expAmt;
+      }
 
       var proj = PID_MAP[tx.project_id];
       if (!proj) return;
@@ -1512,10 +1516,14 @@
     function ebVat(item) {
       var amt = item.total || 0;
       var catName = catMap[item.category_id] || '';
-      // Оплачен — берём реальный НДС из PLS cat=3144/3147 (доверяем даже если 0).
+      // Оплачен — берём реальный НДС из PLS cat=3144/3147.
+      // Для расходов (type=40): PLS 3144 ведётся → доверяем PLS даже если 0 (ИП, нулевая ставка).
+      // Для доходов (type=30): PLS 3144/3147 не генерируются — откатываемся к оценке по ставке.
       if (paidPmIds[item.id]) {
         var vatPls = Math.round(ebPmVatMap[item.id] || 0);
-        return { net: amt - Math.abs(vatPls), vat: Math.abs(vatPls) };
+        if (vatPls !== 0 || item.type === 40) {
+          return { net: amt - Math.abs(vatPls), vat: Math.abs(vatPls) };
+        }
       }
       // Оценка по эффективной ставке (только для неоплаченных позиций)
       var rate;
