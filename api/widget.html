@@ -479,8 +479,6 @@
       if (yr !== curYear && yr !== curYear - 1) return;
 
       var typeName = catMap[tx.category_id] || '';
-      var proj     = PID_MAP[tx.project_id];
-      if (!proj) return;
 
       var isPrev = (yr === curYear - 1);
       var isCur  = (yr === curYear && mo === curMonth);
@@ -489,14 +487,19 @@
       // Для текущего года: только транзакции до выбранной даты включительно
       if (!isPrev && dt > today) return;
 
-      // Финансовая деятельность — только проекты 24 и 26
+      // Займы/кредиты — по всем проектам и счетам (включая Прочие/Закрытые и Прочие счета ВСИП)
+      if ((typeName === 'Получение кредита' || typeName === 'Получение займа') && incAmt > 0) {
+        fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
+      }
+      if ((typeName === 'Выплата кредита' || typeName === 'Выплата займа') && expAmt > 0) {
+        fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
+      }
+
+      var proj = PID_MAP[tx.project_id];
+      if (!proj) return;
+
+      // Финансовая деятельность (переводы и офисная разбивка) — только проекты 24 и 26
       if (OXR_PIDS[tx.project_id]) {
-        if ((typeName === 'Получение кредита' || typeName === 'Получение займа') && incAmt > 0) {
-          fin.skIn[fKey]  += incAmt; if (isCur) fin.skIn.fCur  += incAmt;
-        }
-        if ((typeName === 'Выплата кредита' || typeName === 'Выплата займа') && expAmt > 0) {
-          fin.skOut[fKey] += expAmt; if (isCur) fin.skOut.fCur += expAmt;
-        }
         // Проценты к уплате офисных проектов идут в offBrk.pct, не в fin.int
         if (typeName === 'Перевод между счетами (поступление)' && incAmt > 0) {
           fin.trIn[fKey]  += incAmt; if (isCur) fin.trIn.fCur  += incAmt;
