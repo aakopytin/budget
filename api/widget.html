@@ -891,7 +891,20 @@
       }
     });
 
-    // ── Шаг 5b: план — Внебюджетный лимит (org_account_id=150) ──────────
+    // ── Предварительный расчёт оплаченных ВБ-позиций (нужен в шаге 5b) ─────
+    var ebPlanIds = {};
+    (planItems || []).forEach(function(item) {
+      if (item.org_account_id === 150 && item.id) ebPlanIds[item.id] = true;
+    });
+    var paidPmIds = {};
+    txns.forEach(function(tx) {
+      var pmId = tx.plan_money_id;
+      if (!pmId || !ebPlanIds[pmId]) return;
+      var dt = tx.date || '';
+      if (!today || dt <= today) paidPmIds[pmId] = true;
+    });
+
+        // ── Шаг 5b: план — Внебюджетный лимит (org_account_id=150) ──────────
     (planItems || []).forEach(function(item) {
       if (item.org_account_id !== 150) return;
       if (item.type !== 40 && item.type !== 30) return;  // расходы и доходы
@@ -917,36 +930,22 @@
         tgt.expPlan    += val;
         tgt.vatOutPlan += vo5b;
         tgt.vatOutPlanByProj[pn5b] = (tgt.vatOutPlanByProj[pn5b] || 0) + vo5b;
-      } else {  // доходы (type=30)
-        var _vatRefundCats5b = {'Возврат ДС. за заказы': 1};
-        var _zeroInc5b = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
+      } else if (paidPmIds[item.id]) {  // доходы (type=30) — только фактически полученные
+        // НДС не начисляем расчётно: берётся из PLS cat=3147 (шаг 4a)
         tgt.incPlan += val;
-        if (_vatRefundCats5b[catName] || (!LOAN_CATS[catName] && !_zeroInc5b[catName])) {
-          tgt.vatInPlan += Math.round(val * 22 / 122);
-        }
       }
     });
 
     // ── Шаг 5c: фактический НДС из plsItems cat=3144 по plan_money_id внебюджета ──
-    var ebPlanIds = {}, ebExpPlanIds = {}, ebExpPlanYM = {};
+    // ebPlanIds и paidPmIds уже вычислены перед шагом 5b
+    var ebExpPlanIds = {}, ebExpPlanYM = {};
     (planItems || []).forEach(function(item) {
-      if (item.org_account_id === 150 && item.id) {
-        ebPlanIds[item.id] = true;
-        if (item.type === 40) {
-          ebExpPlanIds[item.id] = true;  // только расходные EB-позиции
-          var dt = item.plan_paid_date || '';
-          if (dt.length >= 7)
-            ebExpPlanYM[item.id] = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
-        }
+      if (item.org_account_id === 150 && item.id && item.type === 40) {
+        ebExpPlanIds[item.id] = true;
+        var dt = item.plan_paid_date || '';
+        if (dt.length >= 7)
+          ebExpPlanYM[item.id] = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
       }
-    });
-    // paidPmIds — план-пункты с фактическим платежом (из txns)
-    var paidPmIds = {};
-    txns.forEach(function(tx) {
-      var pmId = tx.plan_money_id;
-      if (!pmId || !ebPlanIds[pmId]) return;
-      var dt = tx.date || '';
-      if (!today || dt <= today) paidPmIds[pmId] = true;
     });
     // ebPmVatMap — реальный НДС из PLS cat=3144/3147 по ВБ-позициям
     var ebPmVatMap = {}, vfEbVatAdj = 0;
