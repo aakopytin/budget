@@ -297,6 +297,31 @@
     {code:'po',  label:'Прочие офисные'}
   ];
 
+  // Статьи Внепроектных расходов
+  var EP_SUBCATS = [
+    {code:'mat', label:'Материалы'},
+    {code:'smr', label:'Подрядчики (СМР)'},
+    {code:'div', label:'Дивиденды'},
+    {code:'ret', label:'Возвраты'},
+    {code:'po',  label:'Прочие'}
+  ];
+  function epSubcat(name) {
+    var l = (name || '').toLowerCase();
+    if (l.indexOf('материал') === 0 || l.indexOf('оборудован') >= 0) return 'mat';
+    if (l.indexOf('смр') === 0 || l.indexOf('подряд') >= 0
+        || l.indexOf('проектирован') >= 0 || l.indexOf('изыскан') >= 0
+        || l.indexOf('сертификац') >= 0 || l.indexOf('испытан') >= 0
+        || l.indexOf('исполнительн') >= 0 || l.indexOf('мобилизац') >= 0) return 'smr';
+    if (l.indexOf('дивиденд') >= 0) return 'div';
+    if (l.indexOf('возврат') >= 0) return 'ret';
+    return 'po';
+  }
+  function newEpBrk() {
+    var r = {};
+    EP_SUBCATS.forEach(function(s) { r[s.code] = {f25:0, f26:0, fCur:0}; });
+    return r;
+  }
+
   function offSubcat(name) {
     var l = name.toLowerCase();
     // "Налоги с зарплаты" содержит 'зарплат' — проверяем раньше, чем общий zp
@@ -513,7 +538,7 @@
       trOut: { f25:0, f26:0, fCur:0 }    // Переводы списание
     };
     var offBrk = newOffBrk();
-    var epBrk  = newOffBrk();  // разбивка Внепроектных расходов
+    var epBrk  = newEpBrk();   // разбивка Внепроектных расходов
 
     // Остатки по банковским счетам
     var vSt = 0, tSt = 0, vEnd = 0, tEnd = 0;
@@ -583,7 +608,7 @@
 
       // Внепроектные расходы (project 35) — разбивка по подкатегориям
       if (tx.project_id === 35 && expAmt && isExpense(typeName, 'Внепроектные расходы')) {
-        var sub35 = offSubcat(typeName);
+        var sub35 = epSubcat(typeName);
         var brk35 = epBrk[sub35];
         if (isPrev) { brk35.f25 += expAmt; }
         else { brk35.f26 += expAmt; if (isCur) brk35.fCur += expAmt; }
@@ -617,7 +642,7 @@
       offBrkPlan[s.code] = {be_plan:0, hE:0, hE_eb:0, be_eb:0, plan_e:[0,0,0,0,0,0]};
     });
     var epBrkPlan = {};
-    OFF_SUBCATS.forEach(function(s) {
+    EP_SUBCATS.forEach(function(s) {
       epBrkPlan[s.code] = {be_plan:0, hE:0, plan_e:[0,0,0,0,0,0]};
     });
     // Плановые поступления/выплаты займов → финансовая деятельность
@@ -691,7 +716,7 @@
       // Разбивка плана по подкатегориям для внепроектных расходов (project 35)
       if (item.project_id === 35 && isE) {
         var catNameEp = (catMap && catMap[item.category_id]) || '';
-        var subEp = offSubcat(catNameEp);
+        var subEp = epSubcat(catNameEp);
         var obpEp = epBrkPlan[subEp];
         if (iy > curYear || (iy === curYear && im >= curMonth)) obpEp.be_plan += val;
         if (iy === curYear && im === curMonth) obpEp.hE += val;
@@ -1747,7 +1772,7 @@
       return t;
     }
 
-    function pRow(p, type) {
+    function pRow(p, type, rowLabel) {
       var d = pm[p], a = acc[p];
       var b    = getBudget(p, type);
       var f25  = (type === 'inc') ? a.i25  : a.e25;
@@ -1761,7 +1786,7 @@
       var fact = f25 + f26, ost = (b + eb === 0 || (!planPart && !eb)) ? 0 : b + eb - fact;
       if (!b && !fact && plan.every(function(x){ return !x; })) return '';
       return '<tr>'
-        + TDl(p)
+        + TDl(rowLabel !== undefined ? rowLabel : p)
         + TD(fmtK(b), ';color:#9ca3af')
         + TD(fmtK(f25), SEP) + TD(fmtK(f26))
         + TD(fmtK(fact, true))
@@ -1847,13 +1872,13 @@
       if (!a.i25 && !a.i26 && !a.iCur && !a.e25 && !a.e26 && !a.eCur
           && (!d || (!d.bi_plan && !d.be_plan && !d.bi_eb && !d.be_eb))) return '';
 
-      // Подкатегории расходов по убыванию f26
-      var subs = OFF_SUBCATS.filter(function(s) {
+      // Подкатегории расходов по EP_SUBCATS, отфильтровать нулевые (кроме po — всегда последние)
+      var subs = EP_SUBCATS.filter(function(s) {
         return s.code !== 'po' && (epBrk[s.code].f25 || epBrk[s.code].f26 || epBrk[s.code].fCur
           || (epBrkPlan && epBrkPlan[s.code].be_plan));
       });
       subs.sort(function(x, y) { return (epBrk[y.code].f26||0) - (epBrk[x.code].f26||0); });
-      var poSub = OFF_SUBCATS.filter(function(s) { return s.code === 'po'; })[0];
+      var poSub = EP_SUBCATS.filter(function(s) { return s.code === 'po'; })[0];
       if (epBrk.po.f25 || epBrk.po.f26 || epBrk.po.fCur || (epBrkPlan && epBrkPlan.po.be_plan))
         subs.push(poSub);
 
@@ -1878,9 +1903,9 @@
       }).join('');
 
       return sectionHdr('ВНЕПРОЕКТНЫЕ РАСХОДЫ', '#f0fdf4', '#065f46', '#6ee7b7')
-        + pRow(proj, 'inc')
+        + pRow(proj, 'inc', 'Внепроектные доходы')
         + subRows
-        + pRow(proj, 'exp');
+        + pRow(proj, 'exp', 'Итого расходы');
     }
 
     // Строка финансовой деятельности: только факт-колонки, план пустой
