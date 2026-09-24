@@ -925,7 +925,7 @@
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
-      var pn = PID_MAP[p.project_id] || 'Прочие';
+      var pn = PID_MAP[p.project_id] || 'Прочие проекты ИКП';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;
@@ -945,7 +945,7 @@
       var dt = p.date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
-      var pn = PID_MAP[p.project_id] || 'Прочие';
+      var pn = PID_MAP[p.project_id] || 'Прочие проекты ИКП';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
           if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
@@ -980,7 +980,7 @@
         }
       }
       if (!tgt) return;
-      var pn5 = PID_MAP[item.project_id] || 'Прочие';
+      var pn5 = PID_MAP[item.project_id] || 'Прочие проекты ИКП';
       if (isI) {
         tgt.incPlan += val;
         var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
@@ -1036,7 +1036,7 @@
         }
       }
       if (!tgt) return;
-      var pn5b = PID_MAP[item.project_id] || 'Прочие';
+      var pn5b = PID_MAP[item.project_id] || 'Прочие проекты ИКП';
       if (item.type === 40) {  // расходы
         var t = getExpCatType(catName);
         var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
@@ -1139,7 +1139,7 @@
         var vatDiff = vatReal - vatEst;
         tgt.vatOutPlan += vatDiff;
         // Синхронизируем разбивку по проектам: без этого sum(vatOutPlanByProj) ≠ vatOutPlan
-        var pn5d = PID_MAP[item.project_id] || 'Прочие';
+        var pn5d = PID_MAP[item.project_id] || 'Прочие проекты ИКП';
         tgt.vatOutPlanByProj[pn5d] = (tgt.vatOutPlanByProj[pn5d] || 0) + vatDiff;
       }
     });
@@ -1313,21 +1313,20 @@
       if (c.isPast) {
         // Прошлые месяцы: c.vatOut = c.vatOutFact → вклад скаляра = 0; разбивку не трогаем
       } else if (c.isCurrent) {
-        // Текущий месяц: скаляр = max(0, plan−fact); зеркалим per-project
-        var mpI = {};
-        Object.keys(c.vatInPlanByProj).forEach(function(pn) { mpI[pn] = 1; });
-        Object.keys(c.vatInByProj).forEach(function(pn) { mpI[pn] = 1; });
-        Object.keys(mpI).forEach(function(pn) {
-          var d = (c.vatInPlanByProj[pn] || 0) - (c.vatInByProj[pn] || 0);
-          progVatInByProj[pn] = (progVatInByProj[pn] || 0) + Math.max(0, d);
-        });
-        var mp2 = {};
-        Object.keys(c.vatOutPlanByProj).forEach(function(pn) { mp2[pn] = 1; });
-        Object.keys(c.vatOutByProj).forEach(function(pn) { mp2[pn] = 1; });
-        Object.keys(mp2).forEach(function(pn) {
-          var d = (c.vatOutPlanByProj[pn] || 0) - (c.vatOutByProj[pn] || 0);
-          progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + Math.max(0, d);
-        });
+        // Текущий месяц: скаляр = max(0, plan−fact).
+        // Распределяем пропорционально плану по проектам — тогда sum(per-project) = scalar.
+        var scalarRI = Math.max(0, c.vatInPlan - c.vatInFact);
+        if (scalarRI > 0 && c.vatInPlan > 0) {
+          Object.keys(c.vatInPlanByProj).forEach(function(pn) {
+            progVatInByProj[pn] = (progVatInByProj[pn] || 0) + scalarRI * c.vatInPlanByProj[pn] / c.vatInPlan;
+          });
+        }
+        var scalarRO = Math.max(0, c.vatOutPlan - c.vatOutFact);
+        if (scalarRO > 0 && c.vatOutPlan > 0) {
+          Object.keys(c.vatOutPlanByProj).forEach(function(pn) {
+            progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + scalarRO * c.vatOutPlanByProj[pn] / c.vatOutPlan;
+          });
+        }
       } else {
         Object.keys(c.vatInPlanByProj).forEach(function(pn) {
           progVatInByProj[pn] = (progVatInByProj[pn] || 0) + c.vatInPlanByProj[pn];
