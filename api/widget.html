@@ -1441,7 +1441,8 @@
       data.forEach(function(c, ci) {
         var bg = colBg(c);
         var bl = (ci % 3 === 0) ? ';' + BL : '';
-        var val = (c.isPast || c.isCurrent) ? (factByProjFn(c)[projName] || 0) : (planByProjFn(c)[projName] || 0);
+        // Прошлые месяцы — факт; текущий и будущие — план (согласуется с заголовком max(факт,план))
+        var val = c.isPast ? (factByProjFn(c)[projName] || 0) : (planByProjFn(c)[projName] || 0);
         var st = 'padding:1px 5px;text-align:right;font-size:10px;white-space:nowrap;border-bottom:1px solid #f8f8f8;color:#92400e' + (bg ? ';' + bg : '') + bl;
         row += '<td style="' + st + '">' + fv(val) + '</td>';
       });
