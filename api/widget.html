@@ -275,19 +275,9 @@
           && t !== 'Выплата займа'
           && t !== 'Проценты к уплате';
     }
-    return (
-      l.indexOf('материал') === 0 ||
-      l.indexOf('смр') === 0 ||
-      (l.indexOf('банков') >= 0 && l.indexOf('гарант') >= 0) ||
-      l.indexOf('проектирован') >= 0 ||
-      l.indexOf('изыскан') >= 0 ||
-      l.indexOf('оборудован') >= 0 ||
-      l.indexOf('мобилизац') >= 0 ||
-      t === 'Командировки' ||
-      t === 'Составление исполнительной документации' ||
-      t === 'Услуги по сертификации' ||
-      t === 'Тесты и испытания'
-    );
+    // Для всех остальных проектов — учитывать все расходы
+    // (переводы и займы уже отфильтрованы SKIP и предыдущими условиями)
+    return true;
   }
 
   var MS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
@@ -523,6 +513,7 @@
       trOut: { f25:0, f26:0, fCur:0 }    // Переводы списание
     };
     var offBrk = newOffBrk();
+    var epBrk  = newOffBrk();  // разбивка Внепроектных расходов
 
     // Остатки по банковским счетам
     var vSt = 0, tSt = 0, vEnd = 0, tEnd = 0;
@@ -590,6 +581,14 @@
         }
       }
 
+      // Внепроектные расходы (project 35) — разбивка по подкатегориям
+      if (tx.project_id === 35 && expAmt && isExpense(typeName, 'Внепроектные расходы')) {
+        var sub35 = offSubcat(typeName);
+        var brk35 = epBrk[sub35];
+        if (isPrev) { brk35.f25 += expAmt; }
+        else { brk35.f26 += expAmt; if (isCur) brk35.fCur += expAmt; }
+      }
+
       // Доходы и расходы по проектам
       var a = acc[proj];
       if (incAmt > 0 && isIncome(typeName)) {
@@ -602,7 +601,7 @@
       }
     });
 
-    return { acc:acc, fin:fin, offBrk:offBrk, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd };
+    return { acc:acc, fin:fin, offBrk:offBrk, epBrk:epBrk, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd };
   }
 
   // Расчёт плана
@@ -616,6 +615,10 @@
     var offBrkPlan = {};
     OFF_SUBCATS.forEach(function(s) {
       offBrkPlan[s.code] = {be_plan:0, hE:0, hE_eb:0, be_eb:0, plan_e:[0,0,0,0,0,0]};
+    });
+    var epBrkPlan = {};
+    OFF_SUBCATS.forEach(function(s) {
+      epBrkPlan[s.code] = {be_plan:0, hE:0, plan_e:[0,0,0,0,0,0]};
     });
     // Плановые поступления/выплаты займов → финансовая деятельность
     var finPlan = {
@@ -632,8 +635,8 @@
       var val = item.total || 0;
       var isI = (item.type === 30), isE = (item.type === 40);
 
-      // Займы/кредиты в офисных проектах → финансовая деятельность, не в pm
-      if (OXR_PIDS[item.project_id]) {
+      // Займы/кредиты в офисных и внепроектных проектах → финансовая деятельность, не в pm
+      if (OXR_PIDS[item.project_id] || item.project_id === 35) {
         var catName = (catMap && catMap[item.category_id]) || '';
         if (LOAN_CATS[catName]) {
           if (iy === curYear && im === curMonth) {
@@ -685,6 +688,20 @@
           if (match) obp.plan_e[idx] += val;
         });
       }
+      // Разбивка плана по подкатегориям для внепроектных расходов (project 35)
+      if (item.project_id === 35 && isE) {
+        var catNameEp = (catMap && catMap[item.category_id]) || '';
+        var subEp = offSubcat(catNameEp);
+        var obpEp = epBrkPlan[subEp];
+        if (iy > curYear || (iy === curYear && im >= curMonth)) obpEp.be_plan += val;
+        if (iy === curYear && im === curMonth) obpEp.hE += val;
+        nextMonths.forEach(function(nm, idx) {
+          var nmYM   = nm.year * 100 + nm.month;
+          var itemYM = iy * 100 + im;
+          var match  = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
+          if (match) obpEp.plan_e[idx] += val;
+        });
+      }
     });
     // Внебюджетный лимит (org_account_id=150)
     planItems.forEach(function(item) {
@@ -715,7 +732,7 @@
         }
       }
     });
-    return {pm: pm, offBrkPlan: offBrkPlan, finPlan: finPlan};
+    return {pm: pm, offBrkPlan: offBrkPlan, epBrkPlan: epBrkPlan, finPlan: finPlan};
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1667,10 +1684,11 @@
   }
 
   // Построение таблицы
-  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, vat, finPlan, vf, today, sd, sdPrev, ebHtml) {
+  function buildTable(result, pm, curYear, curMonth, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, sd, sdPrev, ebHtml) {
     var acc    = result.acc;
     var fin    = result.fin;
     var offBrk = result.offBrk || newOffBrk();
+    var epBrk  = result.epBrk  || newOffBrk();
     var vSt  = result.vSt,  tSt  = result.tSt;
     var vEnd = result.vEnd, tEnd = result.tEnd;
     var tSt0 = vSt + tSt, tEnd0 = vEnd + tEnd;
@@ -1821,14 +1839,47 @@
         + '</tr>';
     }
 
-    // Секция внепроектных расходов (project 35) — после офисного раздела
+    // Секция внепроектных расходов (project 35) с разбивкой по статьям
     function epExpSection() {
       var proj = 'Внепроектные расходы';
       if (!acc[proj]) return '';
       var a = acc[proj], d = pm[proj];
-      if (!a.e25 && !a.e26 && !a.eCur && (!d || (!d.be_plan && !d.be_eb))) return '';
+      if (!a.i25 && !a.i26 && !a.iCur && !a.e25 && !a.e26 && !a.eCur
+          && (!d || (!d.bi_plan && !d.be_plan && !d.bi_eb && !d.be_eb))) return '';
+
+      // Подкатегории расходов по убыванию f26
+      var subs = OFF_SUBCATS.filter(function(s) {
+        return s.code !== 'po' && (epBrk[s.code].f25 || epBrk[s.code].f26 || epBrk[s.code].fCur
+          || (epBrkPlan && epBrkPlan[s.code].be_plan));
+      });
+      subs.sort(function(x, y) { return (epBrk[y.code].f26||0) - (epBrk[x.code].f26||0); });
+      var poSub = OFF_SUBCATS.filter(function(s) { return s.code === 'po'; })[0];
+      if (epBrk.po.f25 || epBrk.po.f26 || epBrk.po.fCur || (epBrkPlan && epBrkPlan.po.be_plan))
+        subs.push(poSub);
+
+      var subRows = subs.map(function(s) {
+        var brk = epBrk[s.code];
+        var obp = epBrkPlan ? epBrkPlan[s.code] : null;
+        var tot = brk.f25 + brk.f26;
+        var b   = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
+        var ost = (b === 0 || !obp || !obp.be_plan) ? 0 : b - tot;
+        var hE  = obp ? obp.hE : 0;
+        return '<tr>'
+          + TDl('<span style="padding-left:14px">' + s.label + '</span>')
+          + TD(fmtK(b), ';color:#9ca3af')
+          + TD(fmtK(brk.f25), SEP) + TD(fmtK(brk.f26))
+          + TD(fmtK(tot, true))
+          + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
+          + TD(fmtK(0), SEP) + TD(fmtK(hE)) + TD(fmtK(brk.fCur))
+          + (obp ? obp.plan_e : [0,0,0,0,0,0]).map(function(v, i) {
+              return TD(fmtK(v), i === 0 ? SEP : '');
+            }).join('')
+          + '</tr>';
+      }).join('');
+
       return sectionHdr('ВНЕПРОЕКТНЫЕ РАСХОДЫ', '#f0fdf4', '#065f46', '#6ee7b7')
         + pRow(proj, 'inc')
+        + subRows
         + pRow(proj, 'exp');
     }
 
@@ -2249,6 +2300,7 @@
       var vat         = calcVat(plsItems, yr, mo);
       var pm          = planResult.pm;
       var offBrkPlan  = planResult.offBrkPlan;
+      var epBrkPlan   = planResult.epBrkPlan;
       var finPlan     = planResult.finPlan;
       var vf = calcVatForecast(txns, planItems, plsItems, catMap, yr, mo, today);
 
@@ -2390,7 +2442,7 @@
       // ────────────────────────────────────────────────────────────────────
 
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {});
-      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
+      contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + buildVatForecastTable(vf);
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
