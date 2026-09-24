@@ -1258,7 +1258,7 @@
       + row('Ожидаемый текущий НДС',  fK(sd.vatFact),          '', false)
       + row('Ожидаемый плановый НДС', fK(sd.vatPlan),          '', false)
       + row('Изменение резерва',      fK(-sd.reserve),         '#fefce8', false)
-      + row('<strong>Планируемый доход</strong>', '<strong>' + fK(planned) + '</strong>', '#f0fdf4', true)
+      + row('<strong>Контрольная сумма</strong>', '<strong>' + fK(planned) + '</strong>', '#f0fdf4', true)
       + '</table></div>';
   }
 
@@ -2124,15 +2124,15 @@
           + '<td style="padding:2px 6px;text-align:center;font-size:9px;color:#6b8ba4;white-space:nowrap;border-bottom:1px solid #2d4f7c">Δ</td>'
           + '<td colspan="10" style="border-bottom:1px solid #2d4f7c"></td>'
           + '</tr>'
-          + sdRow('Остаток ДС', fmtBal(sd.cashBalance, false), sdPrev ? fmtBal(sdPrev.cashBalance, false) : null, null)
+          + sdRow('Текущий остаток ДС', fmtBal(sd.cashBalance, false), sdPrev ? fmtBal(sdPrev.cashBalance, false) : null, null)
           + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst),    sdPrev ? sdFmt(sdPrev.incOst)    : null, null)
           + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst),   sdPrev ? sdFmt(-sdPrev.expOst)   : null, null)
           + sdRow('Ожидаемые займы',        sdFmt(sd.finOst),    sdPrev ? sdFmt(sdPrev.finOst)    : null, null)
           + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null, null)
           + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null, null)
-          + sdRow('Резерв на выплаты',      sdFmt(-sd.reserve),  sdPrev ? sdFmt(-sdPrev.reserve)  : null, reserveDiff, '#fefce8')
+          + sdRow('Плановый остаток ДС',      sdFmt(-sd.reserve),  sdPrev ? sdFmt(-sdPrev.reserve)  : null, reserveDiff, '#fefce8')
           + '<tr style="background:#f0fdf4">'
-          + '<td colspan="2" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Планируемый доход</td>'
+          + '<td colspan="2" style="padding:4px 6px;font-size:11px;font-weight:700;white-space:nowrap;color:#374151;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb">Контрольная сумма</td>'
           + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb"><span style="color:#9ca3af">0</span></td>'
           + '<td style="padding:4px 6px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;color:#6b7280"><span style="color:#9ca3af">0</span></td>'
           + '<td style="border-top:2px solid #9ca3af;border-bottom:1px solid #e5e7eb;border-left:1px solid #e5e7eb"></td>'
