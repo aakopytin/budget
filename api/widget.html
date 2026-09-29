@@ -927,6 +927,21 @@
       }
     });
 
+    // ── Шаг 4pre: множество (дата:сумма) налоговых транзакций для исключения ЕНП ──
+    // PLS cat=3144 без plan_money_id, совпадающие по (дата, сумма) с транзакцией категории
+    // «Налоги и взносы» / «Налоги - НДС» / «Налог на прибыль» — это физические платежи
+    // НДС в бюджет (ЕНП), а не НДС к вычету от поставщиков. Исключаем из vatOutFact.
+    var TAX_CAT_IDS = {3142: 1, 3144: 1, 1009: 1};  // Налоги и взносы, Налоги-НДС, Налог на прибыль
+    var taxTxKey = {};
+    txns.forEach(function(tx) {
+      if (!TAX_CAT_IDS[tx.category_id]) return;
+      var aid = tx.org_account_id;
+      if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
+      var out = parseFloat(tx.outcome) || 0;
+      if (!out) return;
+      taxTxKey[(tx.date || '') + ':' + out] = 1;
+    });
+
     // ── Шаг 4a: vatInFact из PLS category_id=3147 (Налог - НДС, income)
     // Клиентские транзакции (project_id ≠ TR_PID=27) — НДС хранится в PLS отдельной строкой.
     // Period-attribution: используем plan_paid_date (если есть) для определения периода,
@@ -965,6 +980,8 @@
           if (data[ci].isCurrent && today && p.date > today) break;  // as-of: уже введено
           var amt4b = (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);  // нетто, как в ДДС
           if (!amt4b) break;
+          // Исключаем ЕНП: физический платёж НДС в бюджет (plan_money_id=0, совпадение дата:сумма с налоговой транзакцией)
+          if (!p.plan_money_id && taxTxKey[(p.date || '') + ':' + amt4b]) break;
           data[ci].vatOutFact += amt4b;
           data[ci].vatOutByProj[pn] = (data[ci].vatOutByProj[pn] || 0) + amt4b;
           break;
