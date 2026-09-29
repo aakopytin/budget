@@ -812,6 +812,13 @@
       if (pm.id && pm.plan_paid_date) pmDateMap[pm.id] = pm.plan_paid_date;
     });
 
+    // Множество plan_money.id с category_id=3144 — плановые НДС-платежи в бюджет.
+    // PLS-записи, ссылающиеся на такой план, не являются НДС к вычету от поставщиков.
+    var taxPmSet = {};
+    (planItems || []).forEach(function(pm) {
+      if (pm.id && pm.category_id === 3144) taxPmSet[pm.id] = 1;
+    });
+
     // Суммируем фактические расходы и НДС по типам за весь curYear.
     var effExpByType = {}, effVatByType = {};
     txns.forEach(function(tx) {
@@ -980,8 +987,11 @@
           if (data[ci].isCurrent && today && p.date > today) break;  // as-of: уже введено
           var amt4b = (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);  // нетто, как в ДДС
           if (!amt4b) break;
-          // Исключаем ЕНП: физический платёж НДС в бюджет (plan_money_id=0, совпадение дата:сумма с налоговой транзакцией)
-          if (!p.plan_money_id && taxTxKey[(p.date || '') + ':' + amt4b]) break;
+          // Исключаем НДС-платежи в бюджет: совпадение (дата, сумма) с tax-транзакцией
+          // независимо от pm=0 — охватывает ЕНП и плановые записи «Налоги - август/сентябрь план».
+          if (taxTxKey[(p.date || '') + ':' + amt4b]) break;
+          // Дополнительная защита: plan_money с category_id=3144 (плановые НДС в бюджет)
+          if (p.plan_money_id && taxPmSet[p.plan_money_id]) break;
           data[ci].vatOutFact += amt4b;
           data[ci].vatOutByProj[pn] = (data[ci].vatOutByProj[pn] || 0) + amt4b;
           break;
