@@ -421,7 +421,9 @@
       return items.filter(function(i) {
         if (!i.plan_paid_date) return false;
         var iy = parseInt(i.plan_paid_date.substring(0, 4));
-        return iy >= curYear;  // org_account_id фильтруется в Step 5
+        // Включаем curYear-1, чтобы plan_paid_date прошлого года (Анадырь, Рассказово и т.п.)
+        // попали в pmDateMap и корректно исключились из текущего квартала (period-attribution).
+        return iy >= curYear - 1;  // org_account_id фильтруется в Step 5
       });
     });
   }
