@@ -802,6 +802,14 @@
       if (t && t !== 'zero') planMoneyTypeMap[pm.id] = t;
     });
 
+    // Карта plan_money.id → plan_paid_date (period-attribution PLS).
+    // PLS-записи, введённые в текущем периоде, но относящиеся к прошлым периодам,
+    // используют plan_paid_date плана как дату периода вместо p.date (даты ввода).
+    var pmDateMap = {};
+    (planItems || []).forEach(function(pm) {
+      if (pm.id && pm.plan_paid_date) pmDateMap[pm.id] = pm.plan_paid_date;
+    });
+
     // Суммируем фактические расходы и НДС по типам за весь curYear.
     var effExpByType = {}, effVatByType = {};
     txns.forEach(function(tx) {
@@ -919,16 +927,18 @@
 
     // ── Шаг 4a: vatInFact из PLS category_id=3147 (Налог - НДС, income)
     // Клиентские транзакции (project_id ≠ TR_PID=27) — НДС хранится в PLS отдельной строкой.
+    // Period-attribution: используем plan_paid_date (если есть) для определения периода,
+    // p.date — только для as-of проверки (запись уже введена на дату отчёта).
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3147) return;
       if (p.project_id === TR_PID) return;  // исключаем внутренние переводы ВСИП↔ТТ
-      var dt = p.date || '';
-      if (dt.length < 7) return;
-      var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var periodDate = (p.plan_money_id && pmDateMap[p.plan_money_id]) || (p.date || '');
+      if (periodDate.length < 7) return;
+      var pYM = parseInt(periodDate.slice(0, 4)) * 100 + parseInt(periodDate.slice(5, 7));
       var pn = PID_MAP[p.project_id] || 'Прочие проекты ИКП';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (data[ci].isCurrent && today && dt > today) break;
+          if (data[ci].isCurrent && today && p.date > today) break;  // as-of: уже введено
           var amt4a = (parseFloat(p.income) || 0) - (parseFloat(p.outcome) || 0);  // нетто, как в ДДС
           if (!amt4a) break;
           data[ci].vatInFact += amt4a;
@@ -939,16 +949,18 @@
     });
 
     // ── Шаг 4b: vatOutFact из PLS 3144 (НДС к вычету, ВСИП + ТТ, без трансферов)
+    // Period-attribution: используем plan_paid_date (если есть) для определения периода,
+    // p.date — только для as-of проверки (запись уже введена на дату отчёта).
     (plsItems || []).forEach(function(p) {
       if (p.category_id !== 3144) return;
       if (p.project_id === TR_PID) return;  // исключаем трансферы ВСИП↔ТТ
-      var dt = p.date || '';
-      if (dt.length < 7) return;
-      var pYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
+      var periodDate = (p.plan_money_id && pmDateMap[p.plan_money_id]) || (p.date || '');
+      if (periodDate.length < 7) return;
+      var pYM = parseInt(periodDate.slice(0, 4)) * 100 + parseInt(periodDate.slice(5, 7));
       var pn = PID_MAP[p.project_id] || 'Прочие проекты ИКП';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (data[ci].isCurrent && today && dt > today) break;  // текущий месяц: только до выбранной даты
+          if (data[ci].isCurrent && today && p.date > today) break;  // as-of: уже введено
           var amt4b = (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);  // нетто, как в ДДС
           if (!amt4b) break;
           data[ci].vatOutFact += amt4b;
