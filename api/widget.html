@@ -523,7 +523,7 @@
   }
 
   // Расчёт факта + остатки + финансовая деятельность
-  function calcFact(txns, catMap, curYear, curMonth, today) {
+  function calcFact(txns, catMap, curYear, curMonth, today, bankAccounts) {
     var jan1  = curYear + '-01-01';
 
     var acc = {};
@@ -627,6 +627,24 @@
         else { a.e26 += expAmt; if (isCur) a.eCur += expAmt; }
       }
     });
+
+    // Начальный остаток (fixed_balance из bank_account — не транзакция)
+    if (bankAccounts) {
+      bankAccounts.forEach(function(ba) {
+        var fb  = parseFloat(ba.fixed_balance) || 0;
+        var fbd = ba.fixed_balance_date || '';
+        if (!fb || !fbd) return;
+        var baid = +ba.id;
+        if (VSIP_ACC_IDS[baid]) {
+          if (fbd < jan1)    vSt  += fb;
+          if (fbd <= today)  vEnd += fb;
+        }
+        if (TT_ACC_IDS[baid]) {
+          if (fbd < jan1)    tSt  += fb;
+          if (fbd <= today)  tEnd += fb;
+        }
+      });
+    }
 
     return { acc:acc, fin:fin, offBrk:offBrk, epBrk:epBrk, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd };
   }
@@ -2354,14 +2372,16 @@
       fetchAll('transaction'),
       fetchPlanMoney(yr),
       fetchCategories(),
-      fetchPls(yr).catch(function() { return []; })
+      fetchPls(yr).catch(function() { return []; }),
+      fetchAll('bank_account').catch(function() { return []; })
     ]).then(function(results) {
-      var txns      = results[0];
-      var planItems = results[1];
-      var catMap    = results[2];
-      var plsItems  = results[3];
+      var txns         = results[0];
+      var planItems    = results[1];
+      var catMap       = results[2];
+      var plsItems     = results[3];
+      var bankAccounts = results[4];
       rebuildProjMap(txns, planItems, yr);  // динамическая группировка проектов
-      var factResult  = calcFact(txns, catMap, yr, mo, today);
+      var factResult  = calcFact(txns, catMap, yr, mo, today, bankAccounts);
       var planResult  = calcPlan(planItems, yr, mo, nextMonths, catMap);
       var vat         = calcVat(plsItems, yr, mo);
       var pm          = planResult.pm;
