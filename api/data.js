@@ -5,7 +5,7 @@
 
 const https = require('https');
 
-const GET_ALLOWED = ['plan_money', 'transaction', 'categories', 'transaction_pls'];
+const GET_ALLOWED = ['plan_money', 'transaction', 'categories', 'transaction_pls', 'bank_account'];
 const ALLOWED = ['plan_money', 'transaction', 'categories', 'transaction_pls', 'bank_account'];
 const PAGE_SIZE = 100;
 
@@ -69,7 +69,10 @@ module.exports = async function handler(req, res) {
 
     try {
       const data = await httpsGet(url);
-      return res.end(JSON.stringify(data)); // возвращаем сырой ответ Aspro
+      // Нормализуем items vs records (Aspro использует оба ключа для разных сущностей)
+      const items = (data.response && (data.response.items || data.response.records)) || [];
+      const total = (data.response && data.response.total) || items.length;
+      return res.end(JSON.stringify({ response: { items, total } }));
     } catch (err) {
       res.statusCode = 502;
       return res.end(JSON.stringify({ error: err.message }));
