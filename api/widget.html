@@ -2430,18 +2430,32 @@
       if (nm > 12) { nm -= 12; ny++; }
       nextMonths.push({year: ny, month: nm});
     }
+    // Загрузка в два этапа (как в Бюджет2): сначала лёгкие данные параллельно,
+    // потом transaction отдельно — чтобы не конкурировать за Aspro и не получать 502.
+    var _catMap, _planItems;
     Promise.all([
-      fetchAll('transaction'),
-      fetchPlanMoney(yr),
-      fetchCategories(),
-      fetchPls(yr).catch(function() { return []; }),
-      fetchAll('bank_account').catch(function() { return []; })
-    ]).then(function(results) {
+      fetchCategories().then(function(m) { _catMap = m; }),
+      fetchPlanMoney(yr).then(function(items) { _planItems = items; })
+    ])
+    .then(function() {
+      statusEl.textContent = '⬤ загрузка транзакций...';
+      statusEl.style.color = '#d97706';
+      return fetchAll('transaction');
+    })
+    .then(function(txns_) {
+      statusEl.textContent = '⬤ загрузка НДС...';
+      return Promise.all([
+        Promise.resolve(txns_),
+        fetchPls(yr).catch(function() { return []; }),
+        fetchAll('bank_account').catch(function() { return []; })
+      ]);
+    })
+    .then(function(results) {
       var txns         = results[0];
-      var planItems    = results[1];
-      var catMap       = results[2];
-      var plsItems     = results[3];
-      var bankAccounts = results[4];
+      var plsItems     = results[1];
+      var bankAccounts = results[2];
+      var catMap       = _catMap;
+      var planItems    = _planItems;
       rebuildProjMap(txns, planItems, yr);  // динамическая группировка проектов
       var factResult  = calcFact(txns, catMap, yr, mo, today, bankAccounts);
       var planResult  = calcPlan(planItems, yr, mo, nextMonths, catMap);
