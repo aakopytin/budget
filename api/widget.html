@@ -1296,19 +1296,17 @@
     var pls3144trSum  = pls3144tr.reduce(function(s,p){return s+(parseFloat(p.outcome)||0);},0);
     var pmMapKeys     = Object.keys(planMoneyTypeMap).length;
 
-    // Корректировка НДС: project_id=36 (Проект Корректировки НДС), org_account_id=149, текущий квартал
-    // type=30 (доход = возврат НДС), type=40 (расход = НДС к уплате)
+    // Корректировка НДС: project_id=36 (Проект Корректировки НДС), org_account_id=149.
+    // type=30 (доход = возврат НДС), type=40 (расход = НДС к уплате).
+    // Диапазон: от начала текущего квартала до конца горизонта прогноза (включая dal).
     var vatAdjInc = 0, vatAdjExp = 0;
-    var qEndM = q0m + 2, qEndY = curYear;
-    while (qEndM > 12) { qEndM -= 12; qEndY++; }
     var qStartYM = curYear * 100 + q0m;
-    var qEndYM   = qEndY  * 100 + qEndM;
     (planItems || []).forEach(function(item) {
       if (item.project_id !== 36) return;
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
-      if (pYM < qStartYM || pYM > qEndYM) return;
+      if (pYM < qStartYM) return;  // раньше текущего квартала — не берём
       if (item.type === 30) vatAdjInc += parseFloat(item.total) || 0;
       if (item.type === 40) vatAdjExp += parseFloat(item.total) || 0;
     });
