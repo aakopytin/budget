@@ -1407,20 +1407,20 @@
       if (c.isPast) {
         // Прошлые месяцы: c.vatOut = c.vatOutFact → вклад скаляра = 0; разбивку не трогаем
       } else if (c.isCurrent) {
-        // Текущий месяц: скаляр = max(0, plan−fact).
-        // Распределяем пропорционально плану по проектам — тогда sum(per-project) = scalar.
-        var scalarRI = Math.max(0, c.vatInPlan - c.vatInFact);
-        if (scalarRI > 0 && c.vatInPlan > 0) {
-          Object.keys(c.vatInPlanByProj).forEach(function(pn) {
-            progVatInByProj[pn] = (progVatInByProj[pn] || 0) + scalarRI * c.vatInPlanByProj[pn] / c.vatInPlan;
-          });
-        }
-        var scalarRO = Math.max(0, c.vatOutPlan - c.vatOutFact);
-        if (scalarRO > 0 && c.vatOutPlan > 0) {
-          Object.keys(c.vatOutPlanByProj).forEach(function(pn) {
-            progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + scalarRO * c.vatOutPlanByProj[pn] / c.vatOutPlan;
-          });
-        }
+        // Текущий месяц: для каждого проекта — его собственный остаток max(0, planByProj − factByProj).
+        // Пропорциональное распределение не используется: у проектов без факта остаток = план целиком.
+        Object.keys(c.vatInPlanByProj).forEach(function(pn) {
+          var planP = c.vatInPlanByProj[pn] || 0;
+          var factP = c.vatInByProj[pn] || 0;
+          var rem = Math.max(0, planP - factP);
+          if (rem > 0) progVatInByProj[pn] = (progVatInByProj[pn] || 0) + rem;
+        });
+        Object.keys(c.vatOutPlanByProj).forEach(function(pn) {
+          var planP = c.vatOutPlanByProj[pn] || 0;
+          var factP = c.vatOutByProj[pn] || 0;
+          var rem = Math.max(0, planP - factP);
+          if (rem > 0) progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + rem;
+        });
       } else {
         Object.keys(c.vatInPlanByProj).forEach(function(pn) {
           progVatInByProj[pn] = (progVatInByProj[pn] || 0) + c.vatInPlanByProj[pn];
