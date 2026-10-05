@@ -1320,8 +1320,8 @@
     });
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
     // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
-    // Результат > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
-    var vfFactVatRes  = -vfFVI + vfFVO + vatAdj;
+    // Корректировка — только плановая: в Факт не входит, в ИТОГО входит.
+    var vfFactVatRes  = -vfFVI + vfFVO;
     var vfItogoVatRes = -vfTVI + vfTVO + vatAdj;
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
@@ -1601,8 +1601,8 @@
       return row;
     }
 
-    // Строка Корректировка НДС: в Факт — нетто результат из Проекта Корректировки НДС (project_id=36)
-    function adjRow(label, factVal) {
+    // Строка Корректировка НДС: в Прогноз — плановые корректировки project_id=36
+    function adjRow(label, progVal) {
       var brdT = 'border-top:1px solid #e5e7eb';
       var row = '<tr style="background:#fefce8">';
       row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:normal;width:90px;max-width:90px;color:#92400e"><strong>' + label + '</strong></td>';
@@ -1611,11 +1611,11 @@
         row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + bl + '"><span style="color:#ccc">—</span></td>';
       }
       row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + '"><span style="color:#ccc">—</span></td>';
-      var fClr = factVal > 0 ? '#15803d' : factVal < 0 ? '#dc2626' : '#6b7280';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';background:#f3f4f6;color:' + fClr + '">' + fv(factVal) + '</td>';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + '"><span style="color:#ccc">—</span></td>';
-      var iClr = factVal > 0 ? '#15803d' : factVal < 0 ? '#dc2626' : '#6b7280';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';color:' + iClr + '">' + fv(factVal) + '</td>';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + ';background:#f3f4f6"><span style="color:#ccc">—</span></td>';
+      var pClr = progVal > 0 ? '#15803d' : progVal < 0 ? '#dc2626' : '#6b7280';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';color:' + pClr + '">' + fv(progVal) + '</td>';
+      var iClr = progVal > 0 ? '#15803d' : progVal < 0 ? '#dc2626' : '#6b7280';
+      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';color:' + iClr + '">' + fv(progVal) + '</td>';
       row += '</tr>';
       return row;
     }
@@ -1691,11 +1691,12 @@
       + rateRows
       + '</table></div></div>';
 
-    var vatAdj      = vf.vatAdj || 0;  // нетто Корректировка НДС (project_id=36, текущий квартал)
+    var vatAdj      = vf.vatAdj || 0;  // нетто Корректировка НДС (project_id=36, прогнозный горизонт)
     // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
+    // Корректировка — только плановая, поэтому входит в Прогноз и ИТОГО, но не в Факт.
     // Результат > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
-    var factVatRes  = -factVatIn + factVatOut + vatAdj;
-    var progVatRes  = -progVatIn  + progVatOut;
+    var factVatRes  = -factVatIn + factVatOut;
+    var progVatRes  = -progVatIn  + progVatOut + vatAdj;
     var itogoVatRes = -itogoVatIn + itogoVatOut + vatAdj;
     var factRes     = (factInc  - factVatIn)  - (factExp  - factVatOut);
     var progRes     = (progInc  - progVatIn)  - (progExp  - progVatOut);
