@@ -290,7 +290,7 @@
     {code:'lz',  label:'Лизинг'},
     {code:'ar',  label:'Аренда'},
     {code:'buh', label:'Бухгалтерия'},
-    {code:'ntax',label:'Налоги и взносы'},
+    {code:'ntax',label:'Налоги (НДС, Прибыль)'},
     {code:'pct', label:'Проценты к уплате'},
     {code:'bg',  label:'Банковские гарантии'},
     {code:'ret', label:'Возвраты клиентам'},
@@ -659,7 +659,7 @@
     });
     var offBrkPlan = {};
     OFF_SUBCATS.forEach(function(s) {
-      offBrkPlan[s.code] = {be_plan:0, hE:0, hE_eb:0, be_eb:0, plan_e:[0,0,0,0,0,0]};
+      offBrkPlan[s.code] = {be_plan:0, bi_plan:0, hE:0, hE_eb:0, be_eb:0, plan_e:[0,0,0,0,0,0]};
     });
     var epBrkPlan = {};
     EP_SUBCATS.forEach(function(s) {
@@ -732,6 +732,13 @@
           var match  = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
           if (match) obp.plan_e[idx] += val;
         });
+      }
+      // Плановые поступления по НДС (cat=3147 и аналоги) → ntax.bi_plan (знак минус при отображении)
+      if (OXR_PIDS[item.project_id] && isI) {
+        var subI = offSubcat(catName || (catMap && catMap[item.category_id]) || '');
+        if (subI === 'ntax') {
+          if (iy > curYear || (iy === curYear && im >= curMonth)) offBrkPlan[subI].bi_plan += val;
+        }
       }
       // Разбивка плана по подкатегориям для внепроектных расходов (project 35)
       if (item.project_id === 35 && isE) {
@@ -1886,10 +1893,11 @@
         var brk = offBrk[s.code];
         var obp = offBrkPlan ? offBrkPlan[s.code] : null;
         var tot = brk.f25 + brk.f26;
-        // Бюджет = факт_25 + (факт_26 - тек.мес) + план_от_тек.мес
-        var b    = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
+        // Бюджет = факт_25 + (факт_26 - тек.мес) + план_от_тек.мес − план. поступления НДС
+        var vatInc = (s.code === 'ntax' && obp) ? (obp.bi_plan || 0) : 0;
+        var b    = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0) - vatInc;
         var obEb = obp ? (obp.be_eb || 0) : 0;
-        var ost  = (b + obEb === 0 || !obp || (!obp.be_plan && !obEb)) ? 0 : b + obEb - tot;
+        var ost  = (b + obEb === 0 || !obp || (!obp.be_plan && !obEb && !vatInc)) ? 0 : b + obEb - tot;
         var hE  = obp ? obp.hE : 0;
         return '<tr>'
           + TDl('<span style="padding-left:14px">' + s.label + '</span>')
