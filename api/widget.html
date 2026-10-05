@@ -784,6 +784,34 @@
         }
       }
     });
+    // Плановые поступления НДС с реальных счетов (не 36/150) в офисных проектах → ntax.bi_plan
+    // Пример: «Возврат НДС» на Альфа ВСИП (org_account_id=2), категория «Налог - НДС»
+    planItems.forEach(function(item) {
+      if (item.org_account_id === 36 || item.org_account_id === 150) return; // уже учтены выше
+      if (item.type !== 30) return;  // только поступления (income)
+      if (!OXR_PIDS[item.project_id]) return;  // только офисные проекты (pid 24, 26)
+      var catNameR = (catMap && catMap[item.category_id]) || '';
+      if (offSubcat(catNameR) !== 'ntax') return;  // только налоговые категории
+      var iy = parseInt(item.plan_paid_date.substring(0, 4));
+      var im = parseInt(item.plan_paid_date.substring(5, 7));
+      var val = item.total || 0;
+      var proj = PID_MAP[item.project_id];
+      // Итоговый бюджет (be_plan) и разбивка ntax
+      if (iy > curYear || (iy === curYear && im >= curMonth)) {
+        offBrkPlan.ntax.bi_plan += val;
+        if (proj && pm[proj]) pm[proj].be_plan -= val;  // корректируем «Итого офисные»
+      }
+      // Помесячная разбивка (plan_e) для ntax-строки и «Итого офисные»
+      nextMonths.forEach(function(nm, idx) {
+        var nmYM   = nm.year * 100 + nm.month;
+        var itemYM = iy * 100 + im;
+        var match  = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
+        if (match) {
+          offBrkPlan.ntax.plan_e[idx] -= val;          // строка Налоги: помесячно
+          if (proj && pm[proj]) pm[proj].plan_e[idx] -= val;  // Итого офисные: помесячно
+        }
+      });
+    });
     return {pm: pm, offBrkPlan: offBrkPlan, epBrkPlan: epBrkPlan, finPlan: finPlan};
   }
 
