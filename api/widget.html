@@ -733,11 +733,24 @@
           if (match) obp.plan_e[idx] += val;
         });
       }
-      // Плановые поступления по НДС (cat=3147 и аналоги) → ntax.bi_plan (знак минус при отображении)
+      // Плановые поступления по НДС (cat=3147 и аналоги) → ntax.bi_plan + plan_e (знак минус при отображении)
       if (OXR_PIDS[item.project_id] && isI) {
         var subI = offSubcat(catName || (catMap && catMap[item.category_id]) || '');
         if (subI === 'ntax') {
-          if (iy > curYear || (iy === curYear && im >= curMonth)) offBrkPlan[subI].bi_plan += val;
+          var projI = PID_MAP[item.project_id];
+          if (iy > curYear || (iy === curYear && im >= curMonth)) {
+            offBrkPlan[subI].bi_plan += val;
+            if (projI && pm[projI]) pm[projI].be_plan -= val;  // корректируем «Итого офисные»
+          }
+          nextMonths.forEach(function(nm, idx) {
+            var nmYM   = nm.year * 100 + nm.month;
+            var itemYM = iy * 100 + im;
+            var match  = idx < 5 ? (iy === nm.year && im === nm.month) : (itemYM >= nmYM);
+            if (match) {
+              offBrkPlan[subI].plan_e[idx] -= val;           // строка Налоги: помесячно
+              if (projI && pm[projI]) pm[projI].plan_e[idx] -= val;  // Итого офисные: помесячно
+            }
+          });
         }
       }
       // Разбивка плана по подкатегориям для внепроектных расходов (project 35)
@@ -1077,7 +1090,8 @@
       var pn5 = PID_MAP[item.project_id] || 'Прочие проекты ИКП';
       if (isI) {
         tgt.incPlan += val;
-        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
+        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1,
+                           'Налог - НДС':1,'Налоги - НДС':1};
         if (!zeroIncCats[catName]) {
           var vi5 = Math.round(val * 22 / 122);
           tgt.vatInPlan += vi5;
@@ -1087,7 +1101,7 @@
       if (isE) {
         var t = getExpCatType(catName);
         var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
-        if (OXR_PIDS[item.project_id] && offSubcat(catName) === 'po') rOut = 0;
+        if (OXR_PIDS[item.project_id]) rOut = 0;  // офисные расходы: НДС не планируется
         var vo5 = Math.round(val * rOut);
         tgt.expPlan    += val;
         tgt.vatOutPlan += vo5;
@@ -1134,6 +1148,7 @@
       if (item.type === 40) {  // расходы
         var t = getExpCatType(catName);
         var rOut = (t && t !== null) ? (effRates[t] || 0) : 0;
+        if (OXR_PIDS[item.project_id]) rOut = 0;  // офисные расходы: НДС не планируется
         var vo5b = Math.round(val * rOut);
         tgt.expPlan    += val;
         tgt.vatOutPlan += vo5b;
@@ -1740,7 +1755,8 @@
         var t = getExpCatType(catName);
         rate = (t && t !== null) ? (effRates[t] || 0) : 0;
       } else {
-        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1};
+        var zeroIncCats = {'Прочий доход':1,'Проценты к получению':1,'Получение займов':1,
+                           'Налог - НДС':1,'Налоги - НДС':1};
         rate = zeroIncCats[catName] ? 0 : 22 / 122;
       }
       var vat = Math.round(amt * rate);
