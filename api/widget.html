@@ -241,13 +241,15 @@
     return 'proj_other';
   }
 
-  // Классификация в 4 бакета: mat / smr / smrZ (СМР без НДС) / other — для новой НДС-таблицы.
+  // Классификация в 4 бакета: mat / smr / smrZ (любые «без НДС») / other — для новой НДС-таблицы.
   function expSubType(catName) {
     var l = (catName || '').toLowerCase();
-    if (/^смр/.test(l) && l.indexOf('без ндс') >= 0) return 'smrZ';
+    // Любая категория «без НДС» → нулевая ставка (smrZ), независимо от типа (СМР, материалы и пр.)
+    if (l.indexOf('без ндс') >= 0) return 'smrZ';
     var t = getExpCatType(catName);
     if (t === 'mat') return 'mat';
     if (t === 'smr') return 'smr';
+    if (t === 'zero') return 'smrZ';  // страховочная ветка для остальных нулевых категорий
     return 'other';
   }
 
@@ -2050,10 +2052,11 @@
       + tdTot(fkSign(payFact),';background:#dbeafe')
       + '</tr>';
 
-    return '<div style="margin-top:20px">'
+    var _html2 = '<div style="margin-top:20px">'
       + '<div style="font-size:13px;font-weight:700;color:#374151;padding:3px 5px 2px;border-bottom:2px solid #9ca3af;background:#f8f9fd">'
       + 'НДС ПРОГНОЗ — РАЗБИВКА ПО СТАТЬЯМ (тыс. руб.)</div>'
       + '<table style="' + CS2 + '">' + rows2 + '</table></div>';
+    return {html: _html2, vatFact: factNet2, vatPlan: progNet2};
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
@@ -2102,7 +2105,7 @@
       return { net: amt - vat, vat: vat };
     }
 
-    var totAmt = 0, totNet = 0, totVat = 0;
+    var totAmt = 0, totNet = 0, totVat = 0, totVatDiff = 0;
         var rows = items.map(function(item) {
       var dt = item.plan_paid_date || '';
       var dateStr = dt.length >= 10
@@ -2115,6 +2118,12 @@
       var v = ebVat(item);
       var sign = isExp ? 1 : -1;
       totAmt += sign * amt; totNet += sign * v.net; totVat += sign * v.vat;
+      // Разница в НДС: для оплаченных расходов — разница между 22% и фактической ставкой
+      if (isExp && paidPmIds[item.id]) {
+        var vatStd22 = Math.round(amt * 22 / 122);
+        var vatActual = Math.abs(Math.round(ebPmVatMap[item.id] || 0));
+        if (vatStd22 !== vatActual) totVatDiff += (vatStd22 - vatActual);
+      }
       return '<tr>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + dateStr + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:100px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
@@ -2136,6 +2145,21 @@
       + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#6b7280">' + totSign + fmtFull(Math.abs(totVat)) + '</td>'
       + '</tr>';
 
+    // Разница в НДС: плановый НДС 22% со всех оплаченных расходов со ставкой ≠ 22% минус фактический НДС.
+    var vatDiffRow = '';
+    if (totVatDiff !== 0) {
+      var dSign  = totVatDiff > 0 ? '- ' : '+ ';
+      var dColor = totVatDiff > 0 ? '#dc2626' : '#15803d';
+      vatDiffRow = '<tr style="background:#fffbeb">'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic">Разница в НДС (22% − факт)</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + dColor + ';white-space:nowrap">'
+        + dSign + fmtFull(Math.abs(totVatDiff)) + '</td>'
+        + '<td></td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + dColor + ';white-space:nowrap">'
+        + dSign + fmtFull(Math.abs(totVatDiff)) + '</td>'
+        + '</tr>';
+    }
+
     return '<details style="margin-top:6px;font-family:sans-serif;max-width:50%">'
       + '<summary style="cursor:pointer;padding:5px 8px;font-size:10.5px;color:#6b7280;'
       + 'list-style:none;-webkit-appearance:none;user-select:none;background:#f8f9fd;'
@@ -2153,6 +2177,7 @@
       + '</tr>'
       + rows
       + totalRow
+      + vatDiffRow
       + '</table>'
       + '</details>';
   }
@@ -2865,9 +2890,9 @@
       })();
       // ── END DEBUG ──
 
-      // vfFactVatRes > 0 = к возмещению (refunds > payments) — благоприятно, должно быть положительным в карточке.
-      var _vF      = (vf.vfFactVatRes  || 0);
-      var _vP_raw  = (vf.vfItogoVatRes || 0) - (vf.vfFactVatRes || 0);
+      // НДС факт/план — из нижней таблицы (остаток × ставка). Вычисляем заранее для карточки.
+      var _vat2 = buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan);
+      var _vF   = _vat2.vatFact;
 
       // База: конец предыдущего месяца — всегда считается заново из API-данных,
       // кеш не используется, чтобы все пользователи видели одинаковые значения.
@@ -2901,8 +2926,9 @@
         var _pIncOst  = _sumOstP('inc');
         var _pExpOst  = _sumOstP('exp');
         var _pFinOst  = _skInOP - _skOutOP;
-        var _pVatFact = (_vfP.vfFactVatRes  || 0);
-        var _pVatPlan = (_vfP.vfItogoVatRes || 0) - (_vfP.vfFactVatRes || 0);
+        var _vfP2     = buildVatForecastTable2(_vfP, pm, _frP, offBrkPlan, epBrkPlan);
+        var _pVatFact = _vfP2.vatFact;
+        var _pVatPlan = _vfP2.vatPlan;
         _sdPrev = {
           dateStr:     _prevMonthEnd.slice(8,10) + '.' + _prevMonthEnd.slice(5,7) + '.' + _prevMonthEnd.slice(0,4),
           cashBalance: _pCashBal,
@@ -2915,10 +2941,7 @@
         };
       })();
 
-      // Ожидаемый плановый НДС = полный прогноз из calcVatForecast (включая EB-доходы и расходы).
-      // Используем _vP_raw напрямую — он уже включает vatInPlan от EB-доходов и vatOutPlan от EB-расходов,
-      // чтобы значение совпадало с таблицей НДС ПРОГНОЗ.
-      var _vP = _vP_raw;
+      var _vP = _vat2.vatPlan;
 
       var _sd = {
         dateStr:     today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4),
@@ -2935,7 +2958,7 @@
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {});
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + buildVatForecastTable(vf)
-        + buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan);
+        + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
