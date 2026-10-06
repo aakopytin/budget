@@ -2950,17 +2950,24 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      // Разница в НДС: Σ(материальные расходы текущего месяца × 22/122) − фактический НДС из PLS по материалам
-      // eCurByType['mat'] и vatOutByProjByType['mat'] — оба за текущий месяц (isCur-фильтр)
+      // Разница в НДС: Σ(материальные расходы текущего месяца × 22/122) − фактический НДС из PLS 3144
+      // totalMatAmt из calcFact.eCurByType['mat']; vatActualMat из vf.data[isCurrent].vatOutByProjByType['mat']
       var _matVatDiff = (function() {
         var totalMatAmt = 0;
         Object.keys(factResult.acc || {}).forEach(function(p) {
           var a = factResult.acc[p];
-          if (a && a.eCurByType) totalMatAmt += (a.eCurByType['mat'] || 0);
+          var v = (a && a.eCurByType) ? (a.eCurByType['mat'] || 0) : 0;
+          totalMatAmt += v;
         });
         var vatActualMat = 0;
-        var fbt = (vf && vf.vatOutByProjByType) || {};
-        Object.keys(fbt).forEach(function(p) { vatActualMat += (fbt[p]['mat'] || 0); });
+        if (vf && vf.data) {
+          vf.data.forEach(function(slot) {
+            if (!slot.isCurrent) return;
+            Object.keys(slot.vatOutByProjByType || {}).forEach(function(pn) {
+              vatActualMat += ((slot.vatOutByProjByType[pn] || {})['mat'] || 0);
+            });
+          });
+        }
         return Math.round(totalMatAmt * 22 / 122 - vatActualMat);
       })();
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff);
