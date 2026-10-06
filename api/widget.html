@@ -1257,6 +1257,7 @@
       var catName = (catMap || {})[item.category_id] || '';
       var t = getExpCatType(catName);
       var rate = (t && t !== null) ? (effRates[t] || 0) : 0;
+      if (OXR_PIDS[item.project_id]) rate = 0;  // офисные расходы: НДС не планируется
       vfEbVatAdj += (item.total || 0) * rate;
     });
     // vfEbExpAdj: замена плановой валовой суммы на фактическую (для _expOst).
@@ -1301,6 +1302,7 @@
       if (item.type === 40) {  // расходы: корректируем vatOutPlan
         var t = LOAN_CATS[catName] ? null : getExpCatType(catName);
         var rOut   = (t && t !== null) ? (effRates[t] || 0) : 0;
+        if (OXR_PIDS[item.project_id]) rOut = 0;  // офисные расходы: НДС не планируется
         var vatEst = Math.round((item.total || 0) * rOut);
         var vatReal = ebPmVatMap[item.id] || 0;              // факт из PLS 3144
         var vatDiff = vatReal - vatEst;
@@ -1426,353 +1428,6 @@
       + row('Изменение резерва',      fK(-sd.reserve),         '#fefce8', false)
       + row('<strong>Контрольная сумма</strong>', '<strong>' + fK(planned) + '</strong>', '#f0fdf4', true)
       + '</table></div>';
-  }
-
-  function buildVatForecastTable(vf) {
-    if (!vf) return '';
-    var data = vf.data, dal = vf.dal, cols = vf.cols;
-
-    // Факт = сумма по прошедшим и текущему месяцам
-    var factInc = 0, factVatIn = 0, factExp = 0, factVatOut = 0;
-    var factVatInByProj = {}, factVatOutByProj = {};
-    data.forEach(function(c) {
-      if (c.isPast || c.isCurrent) {
-        factInc    += c.incFact;
-        factVatIn  += c.vatInFact;
-        factExp    += c.expFact;
-        factVatOut += c.vatOutFact;
-        Object.keys(c.vatInByProj).forEach(function(pn) {
-          factVatInByProj[pn] = (factVatInByProj[pn] || 0) + c.vatInByProj[pn];
-        });
-        Object.keys(c.vatOutByProj).forEach(function(pn) {
-          factVatOutByProj[pn] = (factVatOutByProj[pn] || 0) + c.vatOutByProj[pn];
-        });
-      }
-    });
-
-    // Прогноз = оставшийся план (сумма c.inc/exp по всем месяцам − факт + Далее)
-    var progInc = 0, progVatIn = 0, progExp = 0, progVatOut = 0;
-    data.forEach(function(c) {
-      progInc    += c.inc;
-      progVatIn  += c.vatIn;
-      progExp    += c.exp;
-      progVatOut += c.vatOut;
-    });
-    progInc    += dal.inc;    progVatIn  += dal.vatIn;
-    progExp    += dal.exp;    progVatOut += dal.vatOut;
-    data.forEach(function(c) {
-      if (c.isPast || c.isCurrent) {
-        progInc    -= c.incFact;    progVatIn  -= c.vatInFact;
-        progExp    -= c.expFact;    progVatOut -= c.vatOutFact;
-      }
-    });
-
-    // ИТОГО ПЛАН = Факт + Прогноз
-    var itogoInc    = factInc    + progInc;
-    var itogoVatIn  = factVatIn  + progVatIn;
-    var itogoExp    = factExp    + progExp;
-    var itogoVatOut = factVatOut + progVatOut;
-
-    // Прогноз НДС по проектам: прошлые/текущие = план−факт; будущие = план; + Далее
-    var progVatInByProj = {}, progVatOutByProj = {};
-    data.forEach(function(c) {
-      if (c.isPast) {
-        // Прошлые месяцы: c.vatOut = c.vatOutFact → вклад скаляра = 0; разбивку не трогаем
-      } else if (c.isCurrent) {
-        // Текущий месяц: для каждого проекта — его собственный остаток max(0, planByProj − factByProj).
-        // Пропорциональное распределение не используется: у проектов без факта остаток = план целиком.
-        Object.keys(c.vatInPlanByProj).forEach(function(pn) {
-          var planP = c.vatInPlanByProj[pn] || 0;
-          var factP = c.vatInByProj[pn] || 0;
-          var rem = Math.max(0, planP - factP);
-          if (rem > 0) progVatInByProj[pn] = (progVatInByProj[pn] || 0) + rem;
-        });
-        Object.keys(c.vatOutPlanByProj).forEach(function(pn) {
-          var planP = c.vatOutPlanByProj[pn] || 0;
-          var factP = c.vatOutByProj[pn] || 0;
-          var rem = Math.max(0, planP - factP);
-          if (rem > 0) progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + rem;
-        });
-      } else {
-        Object.keys(c.vatInPlanByProj).forEach(function(pn) {
-          progVatInByProj[pn] = (progVatInByProj[pn] || 0) + c.vatInPlanByProj[pn];
-        });
-        Object.keys(c.vatOutPlanByProj).forEach(function(pn) {
-          progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + c.vatOutPlanByProj[pn];
-        });
-      }
-    });
-    Object.keys(dal.vatInPlanByProj || {}).forEach(function(pn) {
-      progVatInByProj[pn] = (progVatInByProj[pn] || 0) + dal.vatInPlanByProj[pn];
-    });
-    Object.keys(dal.vatOutPlanByProj || {}).forEach(function(pn) {
-      progVatOutByProj[pn] = (progVatOutByProj[pn] || 0) + dal.vatOutPlanByProj[pn];
-    });
-
-    var MO = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
-    function mlbl(c) { return MO[c.m - 1] + '\'' + String(c.y).slice(2); }
-    var dalM2 = vf.dalYM % 100, dalY2 = Math.floor(vf.dalYM / 100);
-    var dalLabel = MO[dalM2 - 1] + '\'' + String(dalY2).slice(2) + '+';
-
-    var HS  = 'padding:3px 5px;text-align:right;font-size:10px;font-weight:600;color:#374151;border-bottom:2px solid #9ca3af;white-space:nowrap';
-    var HSl = 'padding:3px 5px;font-size:10px;font-weight:600;color:#374151;border-bottom:2px solid #9ca3af;width:140px';
-    var HSm = HS + ';width:54px';
-    var HSfp = HS + ';width:72px';
-    var HSi = HS + ';width:80px';
-    var BL  = 'border-left:2px solid #3d5c7a';
-
-    function fv(v) {
-      var n = Math.round((v || 0) / 1000);
-      if (!n) return '<span style="color:#ccc">—</span>';
-      return new Intl.NumberFormat('ru-RU').format(n);
-    }
-    function fvC(v, clr) {
-      var n = Math.round((v || 0) / 1000);
-      var c = clr || (v > 0 ? '#15803d' : v < 0 ? '#dc2626' : '#6b7280');
-      return '<span style="color:' + c + ';font-weight:700">' + (n ? new Intl.NumberFormat('ru-RU').format(n) : '—') + '</span>';
-    }
-    function colBg(c) {
-      if (!c) return '';
-      if (c.isPast)    return 'background:#f3f4f6';
-      if (c.isCurrent) return 'background:#eff6ff';
-      return '';
-    }
-
-    // Строка 1 заголовка: кварталы
-    var h1 = '<tr>'
-      + '<th style="' + HSl + '"></th>'
-      + '<th colspan="3" style="' + HS + ';' + BL + ';text-align:center">Текущий квартал</th>'
-      + '<th colspan="3" style="' + HS + ';' + BL + ';text-align:center">Квартал +1</th>'
-      + '<th colspan="3" style="' + HS + ';' + BL + ';text-align:center">Квартал +2</th>'
-      + '<th style="' + HS + ';' + BL + ';text-align:center">Далее</th>'
-      + '<th style="' + HSfp + ';' + BL + ';text-align:center;color:#374151">Факт</th>'
-      + '<th style="' + HSfp + ';' + BL + ';text-align:center;color:#374151">Прогноз</th>'
-      + '<th style="' + HS + ';' + BL + ';text-align:center;color:#1d4ed8">ИТОГО ПЛАН</th>'
-      + '</tr>';
-
-    // Строка 2 заголовка: месяцы
-    // Периоды для заголовков Факт / Прогноз
-    var _curM = vf.curYM % 100, _curY = Math.floor(vf.curYM / 100);
-    var _factFirst = MO[vf.q0m - 1] + '\'' + String(_curY).slice(2);
-    var _factLast  = MO[_curM - 1]  + '\'' + String(_curY).slice(2);
-    var _factPeriod = (vf.q0m === _curM) ? _factFirst : _factFirst + '–' + _factLast;
-    var _progFirstM = _curM + 1, _progFirstY = _curY;
-    if (_progFirstM > 12) { _progFirstM -= 12; _progFirstY++; }
-    var _progPeriod = MO[_progFirstM - 1] + '\'' + String(_progFirstY).slice(2) + '–' + dalLabel;
-
-    var h2 = '<tr><th style="' + HSl + '">тыс. руб.</th>';
-    cols.forEach(function(c, ci) {
-      var bg = data[ci].isPast ? 'background:#e5e7eb' : data[ci].isCurrent ? 'background:#dbeafe' : 'background:#f8f9fd';
-      var bl = (ci % 3 === 0) ? ';' + BL : '';
-      h2 += '<th style="' + HSm + ';' + bg + bl + '">' + mlbl(c) + '</th>';
-    });
-    h2 += '<th style="' + HSm + ';' + BL + '">' + dalLabel + '</th>';
-    h2 += '<th style="' + HSfp + ';' + BL + ';background:#f3f4f6">' + _factPeriod + '</th>';
-    h2 += '<th style="' + HSfp + ';' + BL + '">' + _progPeriod + '</th>';
-    h2 += '<th style="' + HSi + ';' + BL + ';color:#1d4ed8">ИТОГО</th>';
-    h2 += '</tr>';
-
-    function dataRow(label, fn, vatColor, factVal, progVal, itogoVal) {
-      var row = '<tr>';
-      var ls = 'padding:2px 5px;font-size:11px;border-bottom:1px solid #f0f0f0;white-space:normal;color:#374151;overflow:hidden';
-      row += '<td style="' + ls + '">' + label + '</td>';
-      data.forEach(function(c, ci) {
-        var bg = colBg(c);
-        var bl = (ci % 3 === 0) ? ';' + BL : '';
-        var st = 'padding:2px 5px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #f0f0f0' + (bg ? ';' + bg : '') + bl;
-        if (vatColor) st += ';color:' + vatColor;
-        row += '<td style="' + st + '">' + fv(fn(c)) + '</td>';
-      });
-      var dSt = 'padding:2px 5px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : '');
-      row += '<td style="' + dSt + '">' + fv(fn(dal)) + '</td>';
-      var fSt = dSt + ';background:#f3f4f6;width:65px;max-width:65px';
-      row += '<td style="' + fSt + '">' + fv(factVal) + '</td>';
-      var pSt = 'padding:2px 5px;text-align:right;font-size:11px;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : '') + ';width:65px;max-width:65px';
-      row += '<td style="' + pSt + '">' + fv(progVal) + '</td>';
-      var iSt = 'padding:2px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;border-bottom:1px solid #f0f0f0;' + BL + (vatColor ? ';color:' + vatColor : ';color:#1d4ed8');
-      row += '<td style="' + iSt + '">' + fv(itogoVal) + '</td>';
-      row += '</tr>';
-      return row;
-    }
-
-    // Строка разбивки НДС по проекту (факт + план)
-    function projSubRow(projName, factByProjFn, planByProjFn, factByProj, progByProj) {
-      var factVal = factByProj[projName] || 0;
-      var progVal = progByProj[projName] || 0;
-      if (!factVal && !progVal) return '';
-      var itogoVal = factVal + progVal;
-      var row = '<tr>';
-      var ls = 'padding:1px 5px 1px 16px;font-size:10px;border-bottom:1px solid #f8f8f8;color:#78716c;white-space:normal;overflow:hidden';
-      row += '<td style="' + ls + '">· ' + projName + '</td>';
-      data.forEach(function(c, ci) {
-        var bg = colBg(c);
-        var bl = (ci % 3 === 0) ? ';' + BL : '';
-        // Прошлые месяцы — факт; текущий и будущие — план (согласуется с заголовком max(факт,план))
-        var val = c.isPast ? (factByProjFn(c)[projName] || 0) : (planByProjFn(c)[projName] || 0);
-        var st = 'padding:1px 5px;text-align:right;font-size:10px;white-space:nowrap;border-bottom:1px solid #f8f8f8;color:#92400e' + (bg ? ';' + bg : '') + bl;
-        row += '<td style="' + st + '">' + fv(val) + '</td>';
-      });
-      var dalVal = (planByProjFn(dal) || {})[projName] || 0;
-      var dSt = 'padding:1px 5px;text-align:right;font-size:10px;white-space:nowrap;border-bottom:1px solid #f8f8f8;color:#92400e;' + BL;
-      row += '<td style="' + dSt + '">' + fv(dalVal) + '</td>';
-      row += '<td style="' + dSt + ';background:#f3f4f6;width:65px;max-width:65px">' + fv(factVal) + '</td>';
-      row += '<td style="' + dSt + ';width:65px;max-width:65px">' + fv(progVal) + '</td>';
-      row += '<td style="' + dSt + ';font-weight:600">' + fv(itogoVal) + '</td>';
-      row += '</tr>';
-      return row;
-    }
-    function projSubRows(factByProjFn, planByProjFn, factByProj, progByProj) {
-      return PROJECTS.map(function(pn) { return projSubRow(pn, factByProjFn, planByProjFn, factByProj, progByProj); }).join('');
-    }
-
-    function resRow(label, fnV, factV, progV, itogoV, bg) {
-      var brdT = 'border-top:2px solid #9ca3af';
-      var rowBg = bg || '#f0fdf4';
-      var lclr = bg ? '#374151' : '#15803d';
-      var row = '<tr style="background:' + rowBg + '">';
-      row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:normal;width:90px;max-width:90px"><strong style="color:' + lclr + '">' + label + '</strong></td>';
-      data.forEach(function(c, ci) {
-        var cbg = colBg(c);
-        var bl = (ci % 3 === 0) ? ';' + BL : '';
-        var v = fnV(c);
-        var clr = v > 0 ? '#15803d' : v < 0 ? '#dc2626' : '#6b7280';
-        row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + (cbg ? ';' + cbg : '') + bl + ';color:' + clr + '">' + fv(v) + '</td>';
-      });
-      var dalV2 = fnV(dal);
-      var dalClr = dalV2 > 0 ? '#15803d' : dalV2 < 0 ? '#dc2626' : '#6b7280';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + ';' + BL + ';color:' + dalClr + '">' + fv(dalV2) + '</td>';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + ';' + BL + ';background:#f3f4f6">' + fvC(factV) + '</td>';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + ';' + BL + '">' + fvC(progV) + '</td>';
-      var iClr = itogoV > 0 ? '#15803d' : itogoV < 0 ? '#dc2626' : '#6b7280';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + ';' + BL + ';color:' + iClr + '">' + fv(itogoV) + '</td>';
-      row += '</tr>';
-      return row;
-    }
-
-    // Строка Корректировка НДС: в Прогноз — плановые корректировки project_id=36
-    function adjRow(label, progVal) {
-      var brdT = 'border-top:1px solid #e5e7eb';
-      var row = '<tr style="background:#fefce8">';
-      row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:normal;width:90px;max-width:90px;color:#92400e"><strong>' + label + '</strong></td>';
-      for (var i = 0; i < 9; i++) {
-        var bl = (i % 3 === 0) ? ';' + BL : '';
-        row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + bl + '"><span style="color:#ccc">—</span></td>';
-      }
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + '"><span style="color:#ccc">—</span></td>';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;' + brdT + ';' + BL + ';background:#f3f4f6"><span style="color:#ccc">—</span></td>';
-      var pClr = progVal > 0 ? '#15803d' : progVal < 0 ? '#dc2626' : '#6b7280';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';color:' + pClr + '">' + fv(progVal) + '</td>';
-      var iClr = progVal > 0 ? '#15803d' : progVal < 0 ? '#dc2626' : '#6b7280';
-      row += '<td style="padding:3px 5px;text-align:right;font-size:11px;font-weight:700;' + brdT + ';' + BL + ';color:' + iClr + '">' + fv(progVal) + '</td>';
-      row += '</tr>';
-      return row;
-    }
-
-    // Строки ИТОГО НДС к получению / к уплате (одна и та же формула, фильтрация по знаку)
-    function vatSplitRow(label, fnV, factV, progV, itogoV, bg, isPositive, first) {
-      var brdT = first ? 'border-top:2px solid #9ca3af' : 'border-top:1px solid #bfdbfe';
-      var rowBg = bg || '#eff6ff';
-      var dash = '<span style="color:#ccc">—</span>';
-      var cellStyle = function(extra) {
-        return 'padding:3px 5px;text-align:right;font-size:11px;font-weight:700;white-space:nowrap;' + brdT + (extra || '');
-      };
-      var colorFor = function(v) { return v > 0 ? '#15803d' : v < 0 ? '#dc2626' : '#6b7280'; };
-      var showIf   = function(v) { return isPositive ? v > 0 : v < 0; };
-      var cellVal  = function(v, extra) {
-        if (showIf(v)) return '<td style="' + cellStyle(extra) + ';color:' + colorFor(v) + '">' + fv(v) + '</td>';
-        return '<td style="' + cellStyle(extra) + '">' + dash + '</td>';
-      };
-      var row = '<tr style="background:' + rowBg + '">';
-      row += '<td style="padding:3px 5px;font-size:11px;' + brdT + ';white-space:normal;width:90px;max-width:90px"><strong style="color:#374151">' + label + '</strong></td>';
-      data.forEach(function(c, ci) {
-        var bl = (ci % 3 === 0) ? ';' + BL : '';
-        var v = fnV(c);
-        var cbg = colBg(c) ? ';' + colBg(c) : '';
-        row += cellVal(v, bl + cbg);
-      });
-      row += cellVal(fnV(dal), ';' + BL);
-      row += cellVal(factV, ';' + BL + ';background:#f3f4f6');
-      row += cellVal(progV, ';' + BL);
-      row += cellVal(itogoV, ';' + BL);
-      row += '</tr>';
-      return row;
-    }
-
-    // Таблица эффективных ставок
-    var TYPES_LABELS = {smr:'СМР', mat:'Материалы', design:'Проектирование/Изыскание', ar:'Аренда', lz:'Лизинг', buh:'Бухгалтерия', proj_other:'Прочие проектные', bg:'Банк. гарантии', zero:'Без НДС'};
-    var DEFAULT_EFF_RATES_REF = {smr:22/122, mat:22/122, design:22/122, bg:0, ar:22/122, lz:22/122, buh:0, proj_other:22/122, zero:0};
-    var rateRows = '';
-    var TS = 'padding:2px 6px;font-size:10px;border-bottom:1px solid #f0f0f0;white-space:nowrap;color:#374151';
-    var TSr = TS + ';text-align:right';
-    ['smr','mat','design','ar','lz','buh','proj_other','bg','zero'].forEach(function(t) {
-      var exp = vf.effExpByType[t] || 0;
-      var vat = vf.effVatByType[t] || 0;
-      var rate = vf.effRates[t] || 0;
-      var fromFact = exp > 0 && vat > 0;
-      var srcLabel = fromFact ? '<span style="color:#15803d;font-weight:600">факт PLS</span>' : '<span style="color:#9ca3af">дефолт</span>';
-      var rateStr = rate > 0 ? (rate * 100).toFixed(2) + '%' : '0%';
-      var expStr  = exp  > 0 ? new Intl.NumberFormat('ru-RU').format(Math.round(exp / 1000)) + ' тыс.' : '—';
-      var vatStr  = vat  > 0 ? new Intl.NumberFormat('ru-RU').format(Math.round(vat / 1000)) + ' тыс.' : '—';
-      rateRows += '<tr>'
-        + '<td style="' + TS  + '">' + TYPES_LABELS[t] + '</td>'
-        + '<td style="' + TSr + '">' + expStr + '</td>'
-        + '<td style="' + TSr + '">' + vatStr + '</td>'
-        + '<td style="' + TSr + ';font-weight:600;color:#1d4ed8">' + rateStr + '</td>'
-        + '<td style="' + TSr + '">' + srcLabel + '</td>'
-        + '</tr>';
-    });
-    var TH = 'padding:2px 6px;font-size:10px;font-weight:600;color:#6b7280;border-bottom:1.5px solid #9ca3af;white-space:nowrap;text-align:right';
-    var totalEffExp = Object.keys(vf.effExpByType||{}).reduce(function(s,k){return s+(vf.effExpByType[k]||0);},0);
-    var totalEffVat = Object.keys(vf.effVatByType||{}).reduce(function(s,k){return s+(vf.effVatByType[k]||0);},0);
-    var rateTable = '<div style="margin-top:10px">'
-      + '<div onclick="var b=document.getElementById(\'effRateBody\');var a=document.getElementById(\'effRateArr\');if(b.style.display===\'none\'){b.style.display=\'block\';a.textContent=\'▾\';}else{b.style.display=\'none\';a.textContent=\'▸\';}" style="font-size:11px;font-weight:600;color:#6b7280;padding:3px 6px 2px;border-bottom:1px solid #d1d5db;background:#f8f9fd;cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center">'
-      + '<span>Эффективные ставки НДС (расходы)</span><span id="effRateArr" style="font-size:12px">▸</span></div>'
-      + '<div id="effRateBody" style="display:none">'
-      + '<table style="border-collapse:collapse;width:auto;min-width:420px">'
-      + '<tr>'
-      + '<th style="' + TH + ';text-align:left">Тип расходов</th>'
-      + '<th style="' + TH + '">Расходы-факт</th>'
-      + '<th style="' + TH + '">НДС-факт (PLS 3144)</th>'
-      + '<th style="' + TH + '">Ставка</th>'
-      + '<th style="' + TH + '">Источник</th>'
-      + '</tr>'
-      + rateRows
-      + '</table></div></div>';
-
-    var vatAdj      = vf.vatAdj || 0;  // нетто Корректировка НДС (project_id=36, прогнозный горизонт)
-    // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
-    // Корректировка — только плановая, поэтому входит в Прогноз и ИТОГО, но не в Факт.
-    // Результат > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
-    var factVatRes  = -factVatIn + factVatOut;
-    var progVatRes  = -progVatIn  + progVatOut + vatAdj;
-    var itogoVatRes = -itogoVatIn + itogoVatOut + vatAdj;
-    var factRes     = (factInc  - factVatIn)  - (factExp  - factVatOut);
-    var progRes     = (progInc  - progVatIn)  - (progExp  - progVatOut);
-    var itogoRes    = (itogoInc - itogoVatIn) - (itogoExp - itogoVatOut);
-
-    return '<div style="margin-top:16px">'
-      + '<div style="font-size:13px;font-weight:700;color:#374151;padding:3px 5px 2px;border-bottom:2px solid #9ca3af;background:#f8f9fd">'
-      + 'НДС ПРОГНОЗ (тыс. руб.)</div>'
-      + '<table style="border-collapse:collapse;width:100%;table-layout:fixed">'
-      + h1 + h2
-      + dataRow('Поступления',       function(c){return c.inc;},    undefined, factInc,    progInc,    itogoInc)
-      + dataRow('НДС с поступлений', function(c){return c.vatIn;},  '#92400e', factVatIn,  progVatIn,  itogoVatIn)
-      + projSubRows(function(c){return c.vatInByProj;}, function(c){return c.vatInPlanByProj;}, factVatInByProj, progVatInByProj)
-      + dataRow('Выплаты',           function(c){return c.exp;},    undefined, factExp,    progExp,    itogoExp)
-      + dataRow('НДС с выплат',      function(c){return c.vatOut;}, '#92400e', factVatOut, progVatOut, itogoVatOut)
-      + projSubRows(function(c){return c.vatOutByProj;}, function(c){return c.vatOutPlanByProj;}, factVatOutByProj, progVatOutByProj)
-      + resRow('Результат (без НДС)', function(c){return (c.inc-c.vatIn)-(c.exp-c.vatOut);},
-               factRes, progRes, itogoRes)
-      + adjRow('Корректировка НДС', vatAdj)
-      // Формула везде: -НДС_поступлений + НДС_выплат (+ Корректировка в Факт/ИТОГО).
-      // > 0 = к возмещению (зелёный), < 0 = к уплате (красный).
-      + vatSplitRow('Итого НДС к получению', function(c){return -c.vatIn + c.vatOut;},
-                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', true,  true)
-      + vatSplitRow('Итого НДС к уплате',    function(c){return -c.vatIn + c.vatOut;},
-                   factVatRes, progVatRes, itogoVatRes, '#eff6ff', false, false)
-      + '</table>'
-      + rateTable
-      + '</div>';
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -2131,12 +1786,15 @@
         + '</tr>';
     }).join('');
 
-    var totSign  = totAmt >= 0 ? '- ' : '+ ';
-    var totColor = totAmt >= 0 ? '#dc2626' : '#15803d';
-    var totalRow = '<tr style="background:#f3f4f6;font-weight:600">'
+    // Итого с учётом разницы в НДС по материалам
+    var grandAmt  = totAmt  + totVatDiff;
+    var grandNet  = totNet  + totVatDiff;  // разница идёт в «Без НДС»
+    var totSign   = grandAmt >= 0 ? '- ' : '+ ';
+    var totColor  = grandAmt >= 0 ? '#dc2626' : '#15803d';
+    var totalRow  = '<tr style="background:#f3f4f6;font-weight:600">'
       + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#374151;text-align:right">Итого</td>'
-      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + totColor + '">' + totSign + fmtFull(Math.abs(totAmt)) + '</td>'
-      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#374151">' + totSign + fmtFull(Math.abs(totNet)) + '</td>'
+      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + totColor + '">' + totSign + fmtFull(Math.abs(grandAmt)) + '</td>'
+      + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#374151">' + totSign + fmtFull(Math.abs(grandNet)) + '</td>'
       + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#6b7280">' + totSign + fmtFull(Math.abs(totVat)) + '</td>'
       + '</tr>';
 
@@ -2987,7 +2645,6 @@
       })();
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
-        + buildVatForecastTable(vf)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
