@@ -1972,26 +1972,44 @@
       expRows += subRowsHtml;
     });
     // Офисные расходы
-    var offOst2 = groupOst2('Офис (ВСИП+ТТ)');
-    if (offOst2) {
+    // НДС прогноз для группового проекта (без субтипов): blended rate от плана
+    function groupVatProg2(projName, ost) {
+      var pbt2 = progVatOutByProjByType[projName] || {};
+      var d2   = pm[projName];
+      var planTot = d2 ? SUBTYPES.reduce(function(s,k){return s+((d2.bePlanByType||{})[k]||0);},0) : 0;
+      var vatPlanTot = SUBTYPES.reduce(function(s,k){return s+(pbt2[k]||0);},0);
+      var r = (planTot > 0 && vatPlanTot > 0) ? Math.min(vatPlanTot/planTot, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
+      return Math.round(ost * r);
+    }
+    function groupVatFact2(projName) {
+      var fbt2 = factVatOutByProjByType[projName] || {};
+      return SUBTYPES.reduce(function(s,k){return s+(fbt2[k]||0);},0);
+    }
+    // Офисные расходы
+    var offOst2    = groupOst2('Офис (ВСИП+ТТ)');
+    var offVatPr2  = groupVatProg2('Офис (ВСИП+ТТ)', offOst2);
+    var offVatFa2  = groupVatFact2('Офис (ВСИП+ТТ)');
+    if (offOst2 || offVatPr2 || offVatFa2) {
       expRows += '<tr>'
         + tdL('Офисные расходы') + tdL('')
         + tdR(fk2(offOst2))
-        + tdR('<span style="color:#d1d5db">—</span>')
-        + tdR('<span style="color:#d1d5db">—</span>', ';background:#f3f4f6')
+        + tdR(fk2(offVatPr2), ';color:#b45309')
+        + tdR(fk2(offVatFa2), ';background:#fef9c3')
         + '</tr>';
-      totExpOst2 += offOst2;
+      totExpOst2 += offOst2; totExpVatProg2 += offVatPr2; totExpVatFact2 += offVatFa2;
     }
     // Внепроектные расходы
-    var epOst2 = groupOst2('Внепроектные расходы');
-    if (epOst2) {
+    var epOst2    = groupOst2('Внепроектные расходы');
+    var epVatPr2  = groupVatProg2('Внепроектные расходы', epOst2);
+    var epVatFa2  = groupVatFact2('Внепроектные расходы');
+    if (epOst2 || epVatPr2 || epVatFa2) {
       expRows += '<tr>'
         + tdL('Внепроектные расходы') + tdL('')
         + tdR(fk2(epOst2))
-        + tdR('<span style="color:#d1d5db">—</span>')
-        + tdR('<span style="color:#d1d5db">—</span>', ';background:#f3f4f6')
+        + tdR(fk2(epVatPr2), ';color:#b45309')
+        + tdR(fk2(epVatFa2), ';background:#fef9c3')
         + '</tr>';
-      totExpOst2 += epOst2;
+      totExpOst2 += epOst2; totExpVatProg2 += epVatPr2; totExpVatFact2 += epVatFa2;
     }
     rows2 += '<tr style="background:#fff7ed"><td colspan="5" style="padding:2px 7px;font-size:10px;font-weight:700;color:#92400e;border-bottom:1px solid #fed7aa;letter-spacing:0.05em">РАСХОДЫ</td></tr>';
     rows2 += expRows;
