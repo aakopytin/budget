@@ -2060,7 +2060,7 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff) {
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
     paidPmIds = paidPmIds || {};
@@ -2105,7 +2105,8 @@
       return { net: amt - vat, vat: vat };
     }
 
-    var totAmt = 0, totNet = 0, totVat = 0, totVatDiff = 0;
+    var totVatDiff = Math.round(matVatDiff || 0);
+    var totAmt = 0, totNet = 0, totVat = 0;
         var rows = items.map(function(item) {
       var dt = item.plan_paid_date || '';
       var dateStr = dt.length >= 10
@@ -2118,12 +2119,6 @@
       var v = ebVat(item);
       var sign = isExp ? 1 : -1;
       totAmt += sign * amt; totNet += sign * v.net; totVat += sign * v.vat;
-      // Разница в НДС: для оплаченных расходов — разница между 22% и фактической ставкой
-      if (isExp && paidPmIds[item.id]) {
-        var vatStd22 = Math.round(amt * 22 / 122);
-        var vatActual = Math.abs(Math.round(ebPmVatMap[item.id] || 0));
-        if (vatStd22 !== vatActual) totVatDiff += (vatStd22 - vatActual);
-      }
       return '<tr>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + dateStr + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:100px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
@@ -2955,7 +2950,20 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {});
+      // Разница в НДС: Σ(материальные расходы текущего месяца × 22/122) − фактический НДС из PLS по материалам
+      // eCurByType['mat'] и vatOutByProjByType['mat'] — оба за текущий месяц (isCur-фильтр)
+      var _matVatDiff = (function() {
+        var totalMatAmt = 0;
+        Object.keys(factResult.acc || {}).forEach(function(p) {
+          var a = factResult.acc[p];
+          if (a && a.eCurByType) totalMatAmt += (a.eCurByType['mat'] || 0);
+        });
+        var vatActualMat = 0;
+        var fbt = (vf && vf.vatOutByProjByType) || {};
+        Object.keys(fbt).forEach(function(p) { vatActualMat += (fbt[p]['mat'] || 0); });
+        return Math.round(totalMatAmt * 22 / 122 - vatActualMat);
+      })();
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + buildVatForecastTable(vf)
         + _vat2.html;
