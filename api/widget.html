@@ -2950,25 +2950,40 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      // Разница в НДС: Σ(материальные расходы текущего месяца × 22/122) − фактический НДС из PLS 3144
-      // totalMatAmt из calcFact.eCurByType['mat']; vatActualMat из vf.data[isCurrent].vatOutByProjByType['mat']
+      // Разница в НДС: Σ(матер. транзакции тек. месяца × 22/122) − Σ(фактический НДС из PLS 3144)
+      // Материальные категории: имя начинается с "мат" (Материалы*, Мат(*, Мат-* и т.п.)
+      // Фактический НДС: PLS 3144 за тек. месяц, привязка по reference_id транзакции
       var _matVatDiff = (function() {
-        var totalMatAmt = 0;
-        Object.keys(factResult.acc || {}).forEach(function(p) {
-          var a = factResult.acc[p];
-          var v = (a && a.eCurByType) ? (a.eCurByType['mat'] || 0) : 0;
-          totalMatAmt += v;
+        var _curYM = yr * 100 + mo;
+        // Шаг 1: карта reference_id → сумма НДС из PLS 3144 за текущий месяц
+        var _refVatMap = {};
+        (plsItems || []).forEach(function(p) {
+          if (p.category_id !== 3144) return;
+          if (p.project_id === 27) return;          // исключаем переводы ВСИП↔ТТ
+          var dt = p.date || '';
+          if (dt.length < 7) return;
+          if (today && dt > today) return;
+          var pYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
+          if (pYM !== _curYM) return;
+          var v = parseFloat(p.outcome) || 0;
+          if (v && p.reference_id) _refVatMap[p.reference_id] = (_refVatMap[p.reference_id] || 0) + v;
         });
-        var vatActualMat = 0;
-        if (vf && vf.data) {
-          vf.data.forEach(function(slot) {
-            if (!slot.isCurrent) return;
-            Object.keys(slot.vatOutByProjByType || {}).forEach(function(pn) {
-              vatActualMat += ((slot.vatOutByProjByType[pn] || {})['mat'] || 0);
-            });
-          });
-        }
-        return Math.round(totalMatAmt * 22 / 122 - vatActualMat);
+        // Шаг 2: сканируем txns — все материальные расходы тек. месяца
+        var _calcVat = 0, _factVat = 0;
+        txns.forEach(function(tx) {
+          var dt = tx.date || '';
+          if (dt.length < 7) return;
+          var tYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
+          if (tYM !== _curYM) return;
+          if (today && dt > today) return;
+          var expAmt = parseFloat(tx.outcome) || 0;
+          if (!expAmt) return;
+          var catName = catMap[tx.category_id] || '';
+          if (!/^мат/i.test(catName)) return;   // только Материал*/Мат*/мат* категории
+          _calcVat += expAmt * 22 / 122;
+          _factVat += _refVatMap[tx.reference_id] || 0;
+        });
+        return Math.round(_calcVat - _factVat);
       })();
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
