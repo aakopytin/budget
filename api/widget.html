@@ -1905,9 +1905,10 @@
     var totIncOst2=0, totIncVatProg2=0, totIncVatFact2=0;
     var incRows = '';
     PROJECTS.forEach(function(p) {
+      if (p === 'Офис (ВСИП+ТТ)' || p === 'Внепроектные расходы') return;
       var ost    = projOst2(p, 'inc');
-      var vatPr  = progVatInByProj[p] || 0;
       var vatFa  = factVatInByProj[p] || 0;
+      var vatPr  = Math.round(ost * 22/122);
       if (!ost && !vatPr && !vatFa) return;
       totIncOst2 += ost; totIncVatProg2 += vatPr; totIncVatFact2 += vatFa;
       incRows += '<tr>'
@@ -1930,11 +1931,35 @@
     var totExpOst2=0, totExpVatProg2=0, totExpVatFact2=0;
     var expRows = '';
     PROJECTS.forEach(function(p) {
+      if (p === 'Офис (ВСИП+ТТ)' || p === 'Внепроектные расходы') return;
       var totOst = projOst2(p, 'exp');
-      var pbt    = progVatOutByProjByType[p] || {};
       var fbt    = factVatOutByProjByType[p] || {};
-      var pVatPr = SUBTYPES.reduce(function(s,k){return s+(pbt[k]||0);},0);
-      var pVatFa = SUBTYPES.reduce(function(s,k){return s+(fbt[k]||0);},0);
+      var pVatFa = SUBTYPES.reduce(function(sum,k){return sum+(fbt[k]||0);},0);
+      // Compute sub-row НДС прогноз from остаток (Fixes 2 & 4: use rate × ostByType, allow negatives)
+      var pVatPr = 0;
+      var subRowsHtml = '';
+      SUBTYPES.forEach(function(s) {
+        var stOst   = projOstByType2(p, s);
+        var stVatFa = fbt[s] || 0;
+        var stVatPr;
+        if (s === 'mat')       { stVatPr = Math.round(stOst * 22/122); }
+        else if (s === 'smr')  { stVatPr = Math.round(stOst * 5/105); }
+        else if (s === 'smrZ') { stVatPr = 0; }
+        else {
+          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0);
+          var vatPlanOth = ((progVatOutByProjByType[p] || {})['other'] || 0);
+          var rateOth    = (planOth > 0 && vatPlanOth > 0) ? Math.min(vatPlanOth / planOth, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
+          stVatPr = Math.round(stOst * rateOth);
+        }
+        pVatPr += stVatPr;
+        if (!stOst && !stVatPr && !stVatFa) return;
+        subRowsHtml += '<tr>'
+          + tdL('') + tdLs('· ' + SUBTYPE_LABELS[s])
+          + tdRs(fk2(stOst))
+          + tdRs(fk2(stVatPr), ';color:#b45309')
+          + tdRs(fk2(stVatFa), ';background:#fef9c3')
+          + '</tr>';
+      });
       if (!totOst && !pVatPr && !pVatFa) return;
       totExpOst2 += totOst; totExpVatProg2 += pVatPr; totExpVatFact2 += pVatFa;
       // Строка проекта
@@ -1944,19 +1969,7 @@
         + tdR(fk2(pVatPr), ';color:#b45309;font-weight:600')
         + tdR(fk2(pVatFa), ';background:#fef9c3')
         + '</tr>';
-      // Строки субстатей
-      SUBTYPES.forEach(function(s) {
-        var stOst  = projOstByType2(p, s);
-        var stVatPr= pbt[s] || 0;
-        var stVatFa= fbt[s] || 0;
-        if (!stOst && !stVatPr && !stVatFa) return;
-        expRows += '<tr>'
-          + tdL('') + tdLs('· ' + SUBTYPE_LABELS[s])
-          + tdRs(fk2(stOst))
-          + tdRs(fk2(stVatPr), ';color:#b45309')
-          + tdRs(fk2(stVatFa), ';background:#fef9c3')
-          + '</tr>';
-      });
+      expRows += subRowsHtml;
     });
     // Офисные расходы
     var offOst2 = groupOst2('Офис (ВСИП+ТТ)');
@@ -1999,16 +2012,24 @@
       + '</tr>';
 
     // ── ИТОГО НДС ──
-    // Формула: -НДС_доходов + НДС_расходов + Корректировка. >0 = к уплате, <0 = к возмещению.
+    // Формула: -НДС_доходов + НДС_расходов + Корректировка. >0 = к уплате, <0 = к получению.
     var factNet2  = -totIncVatFact2 + totExpVatFact2;
     var progNet2  = -totIncVatProg2 + totExpVatProg2 + vatAdj2;
-    var itogoNet2 = factNet2 + progNet2;
-    var netLabel  = itogoNet2 <= 0 ? 'НДС к получению' : 'НДС к уплате';
+    var recvProg  = progNet2 <= 0 ? progNet2 : 0;
+    var recvFact  = factNet2 <= 0 ? factNet2 : 0;
+    var payProg   = progNet2 > 0  ? progNet2 : 0;
+    var payFact   = factNet2 > 0  ? factNet2 : 0;
     rows2 += '<tr style="background:#eff6ff">'
-      + tdTotL(netLabel,'#eff6ff') + tdTot('','background:#eff6ff')
+      + tdTotL('НДС к получению','#eff6ff') + tdTot('','background:#eff6ff')
       + tdTot('','background:#eff6ff')
-      + tdTot(fkSign(progNet2),';background:#eff6ff')
-      + tdTot(fkSign(factNet2),';background:#dbeafe')
+      + tdTot(fkSign(recvProg),';background:#eff6ff')
+      + tdTot(fkSign(recvFact),';background:#dbeafe')
+      + '</tr>';
+    rows2 += '<tr style="background:#eff6ff">'
+      + tdTotL('НДС к уплате','#eff6ff') + tdTot('','background:#eff6ff')
+      + tdTot('','background:#eff6ff')
+      + tdTot(fkSign(payProg),';background:#eff6ff')
+      + tdTot(fkSign(payFact),';background:#dbeafe')
       + '</tr>';
 
     return '<div style="margin-top:20px">'
