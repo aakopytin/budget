@@ -1705,13 +1705,13 @@
     var payProg   = progNet2 > 0  ? progNet2 : 0;
     var payFact   = factNet2 > 0  ? factNet2 : 0;
     rows2 += '<tr style="background:#eff6ff">'
-      + tdTotL('НДС к получению','#eff6ff') + tdTot('','background:#eff6ff')
+      + tdTotL('НДС к уплате','#eff6ff') + tdTot('','background:#eff6ff')
       + tdTot('','background:#eff6ff')
       + tdTot(fkSign(recvProg),';background:#eff6ff')
       + tdTot(fkSign(recvFact),';background:#dbeafe')
       + '</tr>';
     rows2 += '<tr style="background:#eff6ff">'
-      + tdTotL('НДС к уплате','#eff6ff') + tdTot('','background:#eff6ff')
+      + tdTotL('НДС к возмещению','#eff6ff') + tdTot('','background:#eff6ff')
       + tdTot('','background:#eff6ff')
       + tdTot(fkSign(payProg),';background:#eff6ff')
       + tdTot(fkSign(payFact),';background:#dbeafe')
@@ -1808,13 +1808,13 @@
       + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:#6b7280">' + totSign + fmtFull(Math.abs(totVat)) + '</td>'
       + '</tr>';
 
-    // Разница в НДС: плановый НДС 22% со всех оплаченных расходов со ставкой ≠ 22% минус фактический НДС.
+    // Разница в плановом НДС от материалов: Σ(материалы тек. месяца × 22/122) − фактический НДС (PLS 3144).
     var vatDiffRow = '';
     if (totVatDiff !== 0) {
       var dSign  = totVatDiff > 0 ? '- ' : '+ ';
       var dColor = totVatDiff > 0 ? '#dc2626' : '#15803d';
       vatDiffRow = '<tr style="background:#fffbeb">'
-        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic">Разница в НДС (22% − факт)</td>'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic">Разница в плановом НДС от материалов</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + dColor + ';white-space:nowrap">'
         + dSign + fmtFull(Math.abs(totVatDiff)) + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + dColor + ';white-space:nowrap">'
@@ -2621,38 +2621,37 @@
       };
       // ────────────────────────────────────────────────────────────────────
 
-      // Разница в НДС: Σ(матер. транзакции тек. месяца × 22/122) − Σ(фактический НДС из PLS 3144)
-      // Материальные категории: имя начинается с "мат" (Материалы*, Мат(*, Мат-* и т.п.)
-      // Фактический НДС: PLS 3144 за тек. месяц, привязка по reference_id транзакции
+      // Разница в плановом НДС от материалов:
+      //   Σ(материальные транзакции тек. месяца × 22/122) − Σ(фактический НДС из PLS 3144 по этим транзакциям)
+      // Привязка PLS → транзакция: plan_money_id + дата (reference_id PLS НЕ равен id транзакции).
+      // Если у транзакции/PLS plan_money_id = 0 — запасной ключ: проект + дата.
       var _matVatDiff = (function() {
         var _curYM = yr * 100 + mo;
-        // Шаг 1: карта reference_id → сумма НДС из PLS 3144 за текущий месяц
-        var _refVatMap = {};
-        (plsItems || []).forEach(function(p) {
-          if (p.category_id !== 3144) return;
-          if (p.project_id === 27) return;          // исключаем переводы ВСИП↔ТТ
-          var dt = p.date || '';
-          if (dt.length < 7) return;
-          if (today && dt > today) return;
-          var pYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
-          if (pYM !== _curYM) return;
-          var v = parseFloat(p.outcome) || 0;
-          if (v && p.reference_id) _refVatMap[p.reference_id] = (_refVatMap[p.reference_id] || 0) + v;
-        });
-        // Шаг 2: сканируем txns — все материальные расходы тек. месяца
-        var _calcVat = 0, _factVat = 0;
+        function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
+        function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
+        // Шаг 1: материальные расходы тек. месяца → расчётный НДС и множество ключей
+        var _calcVat = 0, _keys = {};
         txns.forEach(function(tx) {
           var dt = tx.date || '';
-          if (dt.length < 7) return;
-          var tYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
-          if (tYM !== _curYM) return;
+          if (dt.length < 10 || _ym(dt) !== _curYM) return;
           if (today && dt > today) return;
           var expAmt = parseFloat(tx.outcome) || 0;
           if (!expAmt) return;
           var catName = catMap[tx.category_id] || '';
           if (!/^мат/i.test(catName)) return;   // только Материал*/Мат*/мат* категории
           _calcVat += expAmt * 22 / 122;
-          _factVat += _refVatMap[tx.reference_id] || 0;
+          _keys[_key(tx.plan_money_id, tx.project_id, dt)] = 1;
+        });
+        // Шаг 2: фактический НДС — PLS 3144 тек. месяца с тем же ключом (каждая PLS-запись учитывается один раз)
+        var _factVat = 0;
+        (plsItems || []).forEach(function(p) {
+          if (p.category_id !== 3144) return;
+          if (p.project_id === 27) return;          // исключаем переводы ВСИП↔ТТ
+          var dt = p.date || '';
+          if (dt.length < 10 || _ym(dt) !== _curYM) return;
+          if (today && dt > today) return;
+          if (!_keys[_key(p.plan_money_id, p.project_id, dt)]) return;
+          _factVat += (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
         });
         return Math.round(_calcVat - _factVat);
       })();
