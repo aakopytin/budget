@@ -1721,7 +1721,7 @@
       + '<div style="font-size:13px;font-weight:700;color:#374151;padding:3px 5px 2px;border-bottom:2px solid #9ca3af;background:#f8f9fd">'
       + 'НДС ПРОГНОЗ — РАЗБИВКА ПО СТАТЬЯМ (тыс. руб.)</div>'
       + '<table style="' + CS2 + '">' + rows2 + '</table></div>';
-    return {html: _html2, vatFact: factNet2, vatPlan: progNet2, incVatProg: totIncVatProg2};
+    return {html: _html2, vatFact: factNet2, vatPlan: progNet2, incVatProg: totIncVatProg2, expVatProg: totExpVatProg2};
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
@@ -1884,10 +1884,12 @@
         : a.e25 + (a.e26 - a.eCur) + d.be_plan;
     }
 
-    function totals(type) {
+    var EP_NAME  = 'Внепроектные расходы';
+    var OFF_NAME = 'Офис (ВСИП+ТТ)';
+    function totals(type, projList) {
       var t = { b:0, f25:0, f26:0, fCur:0, fH:0, fH_eb:0, plan:[0,0,0,0,0,0] };
       var totalOst = 0;
-      PROJECTS.forEach(function(p) {
+      (projList || PROJECTS).forEach(function(p) {
         var d = pm[p], a = acc[p];
         var b        = getBudget(p, type);
         var planPart = (type === 'inc') ? d.bi_plan : d.be_plan;
@@ -1908,6 +1910,13 @@
       t.fact = t.f25 + t.f26;
       t.ost  = totalOst;
       return t;
+    }
+    // a − b по всем полям (для нетто: расходы − доходы внепроектных)
+    function totDiff(a, b) {
+      var r = { plan:[0,0,0,0,0,0] };
+      ['b','f25','f26','fCur','fH','fH_eb','fact','ost'].forEach(function(k) { r[k] = (a[k]||0) - (b[k]||0); });
+      for (var i = 0; i < 6; i++) r.plan[i] = (a.plan[i]||0) - (b.plan[i]||0);
+      return r;
     }
 
     function pRow(p, type, rowLabel) {
@@ -1993,7 +2002,7 @@
       return sectionHdr('ОФИСНЫЕ РАСХОДЫ', '#f3f0ff', '#4c1d95', '#c4b5fd')
         + subRows
         + '<tr style="background:#ede9fe">'
-        + TDl('<strong>Итого офисные</strong>', BT)
+        + TDl('<strong>Итого офисные расходы</strong>', BT)
         + TD(fmtK(b, true), ';color:#9ca3af' + BT)
         + TD(fmtK(f25, true), SEP + BT) + TD(fmtK(f26, true), BT)
         + TD(fmtK(fact, true), BT)
@@ -2044,7 +2053,7 @@
       return sectionHdr('ВНЕПРОЕКТНЫЕ РАСХОДЫ', '#f0fdf4', '#065f46', '#6ee7b7')
         + pRow(proj, 'inc', 'Внепроектные доходы')
         + subRows
-        + pRow(proj, 'exp', 'Итого расходы');
+        + totRow('Итого нетто внепроектные расходы', tEpNet, '#dcfce7');
     }
 
     // Строка финансовой деятельности: только факт-колонки, план пустой
@@ -2103,7 +2112,13 @@
     var finNetB       = skInB - skOutB;
     var finNetOst     = skInOst - skOutOst;
 
-    var ti = totals('inc'), te = totals('exp');
+    // Доходы — без внепроектных (они показываются только в нетто внепроектных расходов)
+    var PROJ_NO_EP   = PROJECTS.filter(function(p) { return p !== EP_NAME; });
+    var PROJ_PROJECT = PROJECTS.filter(function(p) { return p !== EP_NAME && p !== OFF_NAME; });
+    var ti     = totals('inc', PROJ_NO_EP);
+    var tEpNet = totDiff(totals('exp', [EP_NAME]), totals('inc', [EP_NAME]));  // нетто внепроектные
+    var te     = totDiff(totals('exp'), totals('inc', [EP_NAME]));             // проекты + офис + нетто внепроектные
+    var tProj  = totals('exp', PROJ_PROJECT);                                  // итого проектные расходы
 
     // Контрольная сумма:
     // Остаток_нач + Доходы_26 + ФинПриход_26 - Расходы_26 - ФинРасход_26 = Остаток_кон
@@ -2170,6 +2185,8 @@
     var vatInTot  = vatD.in_25  + vatD.in_26;
     // Плановый НДС от поступлений — итог доходов из таблицы «НДС Прогноз» (buildVatForecastTable2)
     var vatInOst  = (sd && sd.incVatProg) || 0;
+    // Плановый НДС от расходов — итог расходов из таблицы «НДС Прогноз»
+    var vatOutOst = (sd && sd.expVatProg) || 0;
     var vatOutTot = vatD.out_25 + vatD.out_26;
     // Плановый остаток нарастающим итогом (нетто по НДС + финансовая деятельность)
     // Правило: если план строки = 0, остаток = 0 (не вычитаем факт из нуля)
@@ -2361,7 +2378,9 @@
 
       // РАСХОДЫ
       + sectionHdr('РАСХОДЫ', '#fae8e8', '#7f1d1d', '#fca5a5')
-      + PROJECTS.filter(function(p) { return p !== 'Офис (ВСИП+ТТ)' && p !== 'Внепроектные расходы'; }).map(function(p) { return pRow(p, 'exp'); }).join('')
+      + sectionHdr('РАСХОДЫ ПО ПРОЕКТАМ', '#fdf2f2', '#991b1b', '#fecaca')
+      + PROJ_PROJECT.map(function(p) { return pRow(p, 'exp'); }).join('')
+      + totRow('Итого проектные расходы', tProj, '#fde8e8')
       + offExpSection()
       + epExpSection()
       + totRow('ИТОГО РАСХОДЫ', te, '#fef2f2')
@@ -2372,7 +2391,7 @@
       + TD(dash(), ';color:#9ca3af')
       + TD(fmtK(vatD.out_25), SEP) + TD(fmtK(vatD.out_26))
       + TD(fmtK(vatOutTot, true))
-      + TD(dash())
+      + TD(fmtK(vatOutOst))   // Остаток = плановый НДС от расходов (НДС Прогноз, итог расходов)
       + TD(dash(), SEP) + TD(fmtK(vatOutCurPlan)) + TD(fmtK(vatD.out_cur))
       + vatOutPlan.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
       + '</tr>'
@@ -2381,21 +2400,21 @@
       + '<tr style="background:#fff0f0">'
       + TDl('<strong style="color:#991b1b">Расходы без НДС</strong>')
       + TD(dash(), ';color:#9ca3af')
-      + TD(fmtK(te.f25 - vatD.out_25), SEP) + TD(fmtK(te.f26 - vatD.out_26))
-      + TD(fmtK(te.fact - vatOutTot, true))
+      + TD(dash(), SEP) + TD(dash())
       + TD(dash())
-      + TD(dash(), SEP) + TD(fmtK(te.fH - vatOutCurPlan)) + TD(fmtK(te.fCur - vatD.out_cur))
+      + TD(fmtK(te.ost - vatOutOst, true, true), (te.ost - vatOutOst) < 0 ? ';color:#dc2626' : '')  // Остаток расходов − плановый НДС
+      + TD(dash(), SEP) + TD(dash()) + TD(dash())
       + vatOutPlan.map(function(v, i) { return TD(fmtK(te.plan[i] - v, true), i === 0 ? SEP : ''); }).join('')
       + '</tr>'
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
-      + sectionHdr('ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ', '#f0f4ff', '#3730a3', '#c7d2fe')
+      + sectionHdr('ПОЛУЧЕНИЕ/ВЫДАЧА ЗАЙМОВ', '#f0f4ff', '#3730a3', '#c7d2fe')
       + finLoanRow('Выдача/Выплата займов',    fin.skOut, finPlan ? finPlan.skOut.hE   : 0, finPlan ? finPlan.skOut.plan : null)
       + finLoanRow('Получение/Возврат займов', fin.skIn,  finPlan ? finPlan.skIn.hI    : 0, finPlan ? finPlan.skIn.plan  : null)
       + finRow('Процентные расходы', fin.int)
       + finRow('Переводы между счетами', trNet)
       + '<tr style="background:#e0e7ff">'
-      + TDl('<strong>ИТОГО финансовая деятельность</strong>', BT)
+      + TDl('<strong>Итого движение займов</strong>', BT)
       + TD(fmtK(finNetB, true), ';color:#9ca3af' + BT)
       + TD(fmtK(finNetF25, true), SEP + BT) + TD(fmtK(finNetF26, true), BT)
       + TD(fmtK(finNetTot, true), BT)
@@ -2513,10 +2532,12 @@
       var _fin = factResult.fin;
 
       // Остаток бюджета по доходам/расходам (логика totals())
-      function _sumOst(type) {
+      // projList — необязательный список проектов (по умолчанию все PROJECTS)
+      function _sumOst(type, projList) {
         var tot = 0;
-        PROJECTS.forEach(function(p) {
+        (projList || PROJECTS).forEach(function(p) {
           var d = pm[p], a = _acc[p];
+          if (!d || !a) return;
           var b = type === 'inc'
             ? a.i25 + (a.i26 - a.iCur) + d.bi_plan
             : a.e25 + (a.e26 - a.eCur) + d.be_plan;
@@ -2527,8 +2548,12 @@
         });
         return tot;
       }
-      var _incOst = _sumOst('inc');
-      var _expOst = _sumOst('exp') + (vf ? (vf.vfEbExpAdj || 0) : 0);
+      // Доходы — без внепроектных; расходы — с нетто внепроектных (расходы − доходы проекта 35)
+      var _EP = 'Внепроектные расходы';
+      var _projNoEP = PROJECTS.filter(function(p) { return p !== _EP; });
+      var _epIncOst = _sumOst('inc', [_EP]);
+      var _incOst = _sumOst('inc', _projNoEP);
+      var _expOst = _sumOst('exp') - _epIncOst + (vf ? (vf.vfEbExpAdj || 0) : 0);
 
       // finNetOst (аналог buildTable)
       var _fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]},skOut:{hE:0,plan:[0,0,0,0,0,0]}};
@@ -2595,10 +2620,11 @@
         var _planNonEB = planItems.filter(function(i) { return i.org_account_id !== 150; });
         var _vfP = calcVatForecast(txns, _planNonEB, plsItems, catMap, yr, mo, _prevMonthEnd);
         var _aP = _frP.acc, _fnP = _frP.fin;
-        var _sumOstP = function(type) {
+        var _sumOstP = function(type, projList) {
           var tot = 0;
-          PROJECTS.forEach(function(p) {
+          (projList || PROJECTS).forEach(function(p) {
             var d = pm[p], a = _aP[p];
+            if (!d || !a) return;
             var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
             var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
             var pl = type === 'inc' ? d.bi_plan : d.be_plan;
@@ -2611,8 +2637,9 @@
         var _skOutBP = _fnP.skOut.f25 + (_fnP.skOut.f26 - _fnP.skOut.fCur) + _fp.skOut.hE + _skOutPS;
         var _skOutOP = (_skOutBP === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutBP - (_fnP.skOut.f25 + _fnP.skOut.f26);
         var _pCashBal = _frP.vEnd + _frP.tEnd;
-        var _pIncOst  = _sumOstP('inc');
-        var _pExpOst  = _sumOstP('exp');
+        var _pEpIncOst = _sumOstP('inc', [_EP]);
+        var _pIncOst  = _sumOstP('inc', _projNoEP);
+        var _pExpOst  = _sumOstP('exp') - _pEpIncOst;
         var _pFinOst  = _skInOP - _skOutOP;
         var _vfP2     = buildVatForecastTable2(_vfP, pm, _frP, offBrkPlan, epBrkPlan);
         var _pVatFact = _vfP2.vatFact;
@@ -2640,6 +2667,7 @@
         vatFact:     _vF,
         vatPlan:     _vP,
         incVatProg:  _vat2.incVatProg || 0,
+        expVatProg:  _vat2.expVatProg || 0,
         balVsip:     factResult.vEnd,
         balVsipOth:  factResult.voEnd || 0,
         balTT:       factResult.tEnd,
