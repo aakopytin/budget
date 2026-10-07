@@ -2119,6 +2119,10 @@
     var tEpNet = totDiff(totals('exp', [EP_NAME]), totals('inc', [EP_NAME]));  // нетто внепроектные
     var te     = totDiff(totals('exp'), totals('inc', [EP_NAME]));             // проекты + офис + нетто внепроектные
     var tProj  = totals('exp', PROJ_PROJECT);                                  // итого проектные расходы
+    // Поправка по оплаченным внебюджетным расходам (факт − план) — входит в Остаток ИТОГО РАСХОДЫ,
+    // чтобы Остаток совпадал с «Ожидаемыми расходами» прогноза ДС
+    var ebExpAdj = (vf && vf.vfEbExpAdj) || 0;
+    te.ost += ebExpAdj;
 
     // Контрольная сумма:
     // Остаток_нач + Доходы_26 + ФинПриход_26 - Расходы_26 - ФинРасход_26 = Остаток_кон
@@ -2187,6 +2191,27 @@
     var vatInOst  = (sd && sd.incVatProg) || 0;
     // Плановый НДС от расходов — итог расходов из таблицы «НДС Прогноз»
     var vatOutOst = (sd && sd.expVatProg) || 0;
+    // НДС по платежам текущего квартала (= «Ожидаемый текущий НДС») и корректировки НДС (НДС Прогноз)
+    var vatQFact = (sd && sd.vatFact) || 0;
+    var vatAdjQ  = (vf && vf.vatAdj) || 0;
+    // Резерв = Поступления без НДС − Расходы без НДС + остаток ДС на дату + движение займов
+    //          + НДС по платежам тек. квартала + Корректировки НДС
+    var reserveTbl = (ti.ost - vatInOst) - (te.ost - vatOutOst) + tEnd0 + finNetOst + vatQFact + vatAdjQ;
+    if (sd && Math.abs(reserveTbl - (-sd.reserve)) > 1)
+      console.warn('[Резерв] основная таблица', Math.round(reserveTbl), '≠ прогноз ДС', Math.round(-sd.reserve));
+    // Строка только со значением в колонке «Остаток»
+    function ostOnlyRow(label, v, bold, bg) {
+      var bt = bold ? BT : '';
+      return '<tr' + (bg ? ' style="background:' + bg + '"' : '') + '>'
+        + TDl(label, bt)
+        + TD(dash(), ';color:#9ca3af' + bt)
+        + TD(dash(), SEP + bt) + TD(dash(), bt)
+        + TD(dash(), bt)
+        + TD(fmtK(v, bold, true), (v < 0 ? ';color:#dc2626' : '') + bt)
+        + TD(dash(), SEP + bt) + TD(dash(), bt) + TD(dash(), bt)
+        + planEmpty()
+        + '</tr>';
+    }
     var vatOutTot = vatD.out_25 + vatD.out_26;
     // Плановый остаток нарастающим итогом (нетто по НДС + финансовая деятельность)
     // Правило: если план строки = 0, остаток = 0 (не вычитаем факт из нуля)
@@ -2270,16 +2295,21 @@
           return sdFmt(v).replace('font-weight:600', 'font-weight:700');
         }
         // Разбивка остатка на выбранную дату — справа от прогноза (только на выбранную дату)
-        var RS  = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb;border-left:2px solid #3d5c7a';
-        function balSide(lbl, v) {
-          return '<td colspan="2" style="' + RS + '">Остаток на ' + sd.dateStr + ' · ' + lbl + '</td>'
-            + '<td style="' + VS + '">' + fmtBal(v, false) + '</td>'
-            + '<td colspan="7" style="' + ES + '"></td>';
+        // Значение — в колонке «Остаток»; описание растянуто на 9 колонок справа,
+        // чтобы не расширять колонки основной таблицы
+        var RSV = VS + ';border-left:2px solid #3d5c7a';
+        var RSL = 'padding:3px 6px;font-size:11px;white-space:nowrap;color:#374151;border-bottom:1px solid #e5e7eb';
+        function balSide(lbl, v, bold) {
+          var val = fmtBal(v, !!bold), txt = 'Остаток на ' + sd.dateStr + ' · ' + lbl;
+          return '<td style="' + RSV + (bold ? ';border-top:1px solid #9ca3af' : '') + '">' + val + '</td>'
+            + '<td colspan="9" style="' + RSL + (bold ? ';font-weight:700;border-top:1px solid #9ca3af' : '') + '">' + txt + '</td>';
         }
+        var _sbB = (sd.balVsip || 0) - (sd.balVsipOth || 0), _sbO = sd.balVsipOth || 0, _sbT = sd.balTT || 0;
         var sideRows = [
-          balSide('ВСИП Банки',  (sd.balVsip || 0) - (sd.balVsipOth || 0)),
-          balSide('ВСИП Прочие', sd.balVsipOth || 0),
-          balSide('ТТ',          sd.balTT || 0)
+          balSide('ВСИП Банки',  _sbB),
+          balSide('ВСИП Прочие', _sbO),
+          balSide('ТТ',          _sbT),
+          balSide('ИТОГО',       _sbB + _sbO + _sbT, true)
         ];
         var sideIdx = 0;
         function sdRow(lbl, valHtml, valPrevHtml, diffHtml, bg) {
@@ -2422,6 +2452,12 @@
       + TD(dash(), SEP + BT) + TD(fmtK(finNetPlanCur, true), BT) + TD(fmtK(finNetCur, true), BT)
       + finNetPlan.map(function(v, i) { return TD(fmtK(v, true), (i === 0 ? SEP : '') + BT); }).join('')
       + '</tr>'
+
+      // НДС по платежам текущего квартала / Корректировки НДС / Резерв
+      + ostOnlyRow('НДС по платежам текущего квартала', vatQFact, false, '')
+      + ostOnlyRow('Корректировки НДС', vatAdjQ, false, '')
+      + ostOnlyRow('<strong>Резерв выплат по завершенным проектам</strong>', reserveTbl, true, '#fefce8')
+      + '<tr><td colspan="15" style="height:10px;background:#fff;border:none"></td></tr>'
 
       // Закрывающий остаток на текущую дату
       + balCloseRow('ВСИП Банки', vEnd - voEnd, false)
