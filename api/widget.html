@@ -557,6 +557,8 @@
 
     // Остатки по банковским счетам
     var vSt = 0, tSt = 0, vEnd = 0, tEnd = 0;
+    var VSIP_OTH_ACC = {3:1, 161:1}; // «ВСИП ИП и СС» + «Прочие счета» → строка «ВСИП Прочие»
+    var voSt = 0, voEnd = 0;         // остатки по счетам 3 и 161 (входят и в vSt/vEnd)
 
     txns.forEach(function(tx) {
       var dt     = tx.date || '';
@@ -568,6 +570,10 @@
       if (VSIP_ACC_IDS[aid]) {
         if (dt < jan1)   vSt  += incAmt - expAmt;
         if (dt <= today) vEnd += incAmt - expAmt;
+        if (VSIP_OTH_ACC[+aid]) {
+          if (dt < jan1)   voSt  += incAmt - expAmt;
+          if (dt <= today) voEnd += incAmt - expAmt;
+        }
       }
       if (TT_ACC_IDS[aid]) {
         if (dt < jan1)   tSt  += incAmt - expAmt;
@@ -658,6 +664,10 @@
         if (VSIP_ACC_IDS[baid]) {
           if (fbd < jan1)    vSt  += fb;
           if (fbd <= today)  vEnd += fb;
+          if (VSIP_OTH_ACC[baid]) {
+            if (fbd < jan1)    voSt  += fb;
+            if (fbd <= today)  voEnd += fb;
+          }
         }
         if (TT_ACC_IDS[baid]) {
           if (fbd < jan1)    tSt  += fb;
@@ -666,7 +676,7 @@
       });
     }
 
-    return { acc:acc, fin:fin, offBrk:offBrk, epBrk:epBrk, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd };
+    return { acc:acc, fin:fin, offBrk:offBrk, epBrk:epBrk, vSt:vSt, tSt:tSt, vEnd:vEnd, tEnd:tEnd, voSt:voSt, voEnd:voEnd };
   }
 
   // Расчёт плана
@@ -1843,6 +1853,7 @@
     var epBrk  = result.epBrk  || newOffBrk();
     var vSt  = result.vSt,  tSt  = result.tSt;
     var vEnd = result.vEnd, tEnd = result.tEnd;
+    var voSt = result.voSt || 0, voEnd = result.voEnd || 0;  // ВСИП Прочие (счета 3 и 161)
     var tSt0 = vSt + tSt, tEnd0 = vEnd + tEnd;
 
     var todayStr  = today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4);
@@ -2294,7 +2305,8 @@
       + '<tbody>'
 
       // Начальный остаток на 01.01
-      + balOpenRow('ВСИП', vSt, false)
+      + balOpenRow('ВСИП Банки', vSt - voSt, false)
+      + balOpenRow('ВСИП Прочие', voSt, false)
       + balOpenRow('ТТ', tSt, false)
       + balOpenRow('ИТОГО', tSt0, true)
 
@@ -2371,7 +2383,8 @@
       + '</tr>'
 
       // Закрывающий остаток на текущую дату
-      + balCloseRow('ВСИП', vEnd, false)
+      + balCloseRow('ВСИП Банки', vEnd - voEnd, false)
+      + balCloseRow('ВСИП Прочие', voEnd, false)
       + balCloseRow('ТТ', tEnd, false)
       + balCloseRow('ИТОГО', tEnd0, true)
 
