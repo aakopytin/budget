@@ -914,13 +914,15 @@
     // Карта plan_money.id → catType.
     // PLS-запись содержит plan_money_id — прямую FK на план. У плана есть category_id.
     var planMoneyTypeMap = {};
-    var planMoneySubTypeMap = {};  // id → 'mat'|'smr'|'smrZ'|'other' (4 бакета для новой таблицы)
+    var planMoneySubTypeMap = {};
+    var planMoneyOffSubMap  = {};  // id → код подкатегории офиса (zp/nzp/km/ntax/...)  // id → 'mat'|'smr'|'smrZ'|'other' (4 бакета для новой таблицы)
     (planItems || []).forEach(function(pm) {
       if (!pm.id) return;
       var catName = catMap[pm.category_id] || '';
       var t = getExpCatType(catName);
       if (t && t !== 'zero') planMoneyTypeMap[pm.id] = t;
       planMoneySubTypeMap[pm.id] = expSubType(catName);
+      planMoneyOffSubMap[pm.id]  = offSubcat(catName);  // для разбивки факт. НДС офиса
     });
 
     // Карта plan_money.id → plan_paid_date (period-attribution PLS).
@@ -994,6 +996,7 @@
         vatInByProj: {}, vatOutByProj: {},
         vatInPlanByProj: {}, vatOutPlanByProj: {},
         vatOutByProjByType: {},     // {projName: {mat,smr,smrZ,other}} — факт НДС по субтипу
+        vatOutOffBySub: {},         // факт НДС офиса по подкатегориям (zp/nzp/km/ntax/...)
         vatOutPlanByProjByType: {}  // {projName: {mat,smr,smrZ,other}} — план НДС по субтипу
       };
     }
@@ -1118,6 +1121,10 @@
           var _st4b = planMoneySubTypeMap[p.plan_money_id] || 'other';
           if (!data[ci].vatOutByProjByType[pn]) data[ci].vatOutByProjByType[pn] = {mat:0,smr:0,smrZ:0,other:0};
           data[ci].vatOutByProjByType[pn][_st4b] = (data[ci].vatOutByProjByType[pn][_st4b] || 0) + amt4b;
+          if (pn === 'Офис (ВСИП+ТТ)') {
+            var _os4b = (p.plan_money_id && planMoneyOffSubMap[p.plan_money_id]) || 'po';
+            data[ci].vatOutOffBySub[_os4b] = (data[ci].vatOutOffBySub[_os4b] || 0) + amt4b;
+          }
           break;
         }
       }
@@ -1652,18 +1659,61 @@
       var fbt2 = factVatOutByProjByType[projName] || {};
       return SUBTYPES.reduce(function(s,k){return s+(fbt2[k]||0);},0);
     }
-    // Офисные расходы
-    var offOst2    = groupOst2('Офис (ВСИП+ТТ)');
-    var offVatPr2  = groupVatProg2('Офис (ВСИП+ТТ)', offOst2);
-    var offVatFa2  = groupVatFact2('Офис (ВСИП+ТТ)');
-    if (offOst2 || offVatPr2 || offVatFa2) {
-      expRows += '<tr>'
-        + tdL('Офисные расходы') + tdL('')
-        + tdR(fk2(offOst2))
-        + tdR(fk2(offVatPr2), ';color:#b45309')
-        + tdR(fk2(offVatFa2), ';background:#fef9c3')
+    // Офисные расходы — в стиле проектов, разбивка по статьям.
+    // Плановый НДС по офису = 0: ставки по плановым офисным расходам обнулены (OXR_PIDS → rOut = 0),
+    // поэтому fallback на proj_other / 22/122 (как в groupVatProg2) для офиса не применяется.
+    var _offBrkF = (factResult && factResult.offBrk) || {};
+    var _offFactBySub = {};
+    (vf.data || []).forEach(function(c) {
+      if (!c.isPast && !c.isCurrent) return;
+      Object.keys(c.vatOutOffBySub || {}).forEach(function(k) {
+        _offFactBySub[k] = (_offFactBySub[k] || 0) + c.vatOutOffBySub[k];
+      });
+    });
+    function _offOst(code) {
+      var obp = offBrkPlan ? offBrkPlan[code] : null;
+      var plan = obp ? (obp.be_plan || 0) + (obp.be_eb || 0) : 0;
+      var fCur = (_offBrkF[code] && _offBrkF[code].fCur) || 0;
+      return plan ? plan - fCur : 0;   // как groupOst2: без плана остаток = 0
+    }
+    var OFF_GROUPS = [
+      {label:'Зарплата',          codes:['zp']},
+      {label:'Налоги с зарплаты', codes:['nzp']},
+      {label:'Командировки',      codes:['km']},
+      {label:'Прочий офис',       codes:['bk','lz','ar','buh','pct','bg','ret','po']}
+    ];
+    var offTotOst = 0, offTotFa = 0, offSubHtml = '';
+    OFF_GROUPS.forEach(function(g) {
+      var o = 0, fa = 0;
+      g.codes.forEach(function(c) { o += _offOst(c); fa += _offFactBySub[c] || 0; });
+      offTotOst += o; offTotFa += fa;
+      if (!o && !fa) return;
+      offSubHtml += '<tr>'
+        + tdL('') + tdLs('· ' + g.label)
+        + tdRs(fk2(o))
+        + tdRs(fk2(0), ';color:#b45309')
+        + tdRs(fk2(fa), ';background:#fef9c3')
         + '</tr>';
-      totExpOst2 += offOst2; totExpVatProg2 += offVatPr2; totExpVatFact2 += offVatFa2;
+    });
+    if (offTotOst || offTotFa) {
+      expRows += '<tr style="background:#fff7ed">'
+        + tdL('<strong>Офисные расходы</strong>','#fff7ed') + tdL('')
+        + tdR(fk2(offTotOst), ';font-weight:600')
+        + tdR(fk2(0), ';color:#b45309;font-weight:600')
+        + tdR(fk2(offTotFa), ';background:#fef9c3')
+        + '</tr>' + offSubHtml;
+      totExpOst2 += offTotOst; totExpVatFact2 += offTotFa;
+    }
+    // Налоги (офисная статья ntax) — отдельной строкой
+    var taxOst2 = _offOst('ntax'), taxFa2 = _offFactBySub['ntax'] || 0;
+    if (taxOst2 || taxFa2) {
+      expRows += '<tr>'
+        + tdL('Налоги') + tdL('')
+        + tdR(fk2(taxOst2))
+        + tdR(fk2(0), ';color:#b45309')
+        + tdR(fk2(taxFa2), ';background:#fef9c3')
+        + '</tr>';
+      totExpOst2 += taxOst2; totExpVatFact2 += taxFa2;
     }
     // Внепроектные расходы
     var epOst2    = groupOst2('Внепроектные расходы');
