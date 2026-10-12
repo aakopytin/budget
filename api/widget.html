@@ -1782,7 +1782,7 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff) {
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
     paidPmIds = paidPmIds || {};
@@ -1828,6 +1828,7 @@
     }
 
     var totVatDiff = Math.round(matVatDiff || 0);
+    var smrDiff    = Math.round(smrVatDiff || 0);   // доход (+): уменьшает итог расходов
     var totAmt = 0, totNet = 0, totVat = 0;
         var rows = items.map(function(item) {
       var dt = item.plan_paid_date || '';
@@ -1854,8 +1855,8 @@
     }).join('');
 
     // Итого с учётом разницы в НДС по материалам
-    var grandAmt  = totAmt  + totVatDiff;
-    var grandNet  = totNet  + totVatDiff;  // разница идёт в «Без НДС»
+    var grandAmt  = totAmt  + totVatDiff - smrDiff;
+    var grandNet  = totNet  + totVatDiff - smrDiff;  // разницы идут в «Без НДС»
     var totSign   = grandAmt >= 0 ? '- ' : '+ ';
     var totColor  = grandAmt >= 0 ? '#dc2626' : '#15803d';
     var totalRow  = '<tr style="background:#f3f4f6;font-weight:600">'
@@ -1876,6 +1877,19 @@
         + dSign + fmtFull(Math.abs(totVatDiff)) + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + dColor + ';white-space:nowrap">'
         + dSign + fmtFull(Math.abs(totVatDiff)) + '</td>'
+        + '<td></td>'
+        + '</tr>';
+    }
+    // Разница в плановом НДС от СМР: Σ(СМР тек. месяца × 22/122) − Σ(те же × 5/105). Доход, со знаком «+».
+    if (smrDiff !== 0) {
+      var sSign  = smrDiff > 0 ? '+ ' : '- ';
+      var sColor = smrDiff > 0 ? '#15803d' : '#dc2626';
+      vatDiffRow += '<tr style="background:#fffbeb">'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic">Разница в плановом НДС от СМР</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
+        + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
+        + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
         + '<td></td>'
         + '</tr>';
     }
@@ -2501,49 +2515,25 @@
       // Узкий разделитель
       + '<tr><td colspan="15" style="height:4px;padding:0;background:#e8edf3;border:none"></td></tr>'
 
-      // НЕТТО: Приходы − Расходы
-      // с НДС = ИТОГО ДОХОДЫ − ИТОГО РАСХОДЫ
+      // НЕТТО: Приходы − Расходы (значения только в колонке «Остаток»)
       + (function() {
-          var nB = ti.b - te.b, nF25 = ti.f25 - te.f25, nF26 = ti.f26 - te.f26, nFact = ti.fact - te.fact;
-          var nOst = ti.ost - te.ost, nEb = ti.fH_eb - te.fH_eb, nH = ti.fH - te.fH, nCur = ti.fCur - te.fCur;
-          var nPlan = ti.plan.map(function(v, i) { return v - te.plan[i]; });
-          // Ожидаемый НДС = НДС с поступлений − НДС с выплат
-          var vF25 = vatD.in_25 - vatD.out_25, vF26 = vatD.in_26 - vatD.out_26, vTot = vatInTot - vatOutTot;
-          var vOst = vatInOst - vatOutOst, vCurP = vatInCurPlan - vatOutCurPlan, vCur = vatD.in_cur - vatD.out_cur;
-          var vPlan = vatInPlan.map(function(v, i) { return v - vatOutPlan[i]; });
-          // без НДС = Поступления без НДС − Расходы без НДС
-          var wOst = nOst - vOst;
-          var wPlan = nPlan.map(function(v, i) { return v - vPlan[i]; });
+          var nOst = ti.ost - te.ost;               // с НДС = ИТОГО ДОХОДЫ − ИТОГО РАСХОДЫ
+          var vOst = vatInOst - vatOutOst;          // Ожидаемый НДС = НДС с поступлений − НДС с выплат
+          var wOst = nOst - vOst;                   // без НДС = Поступления без НДС − Расходы без НДС
           if (sd && Math.abs(nOst - (sd.incOst - sd.expOst)) > 1)
             console.warn('[Нетто] Остаток с НДС', Math.round(nOst), '≠ прогноз ДС', Math.round(sd.incOst - sd.expOst));
-          var red = function(v) { return v < 0 ? ';color:#dc2626' : ''; };
-          return '<tr style="background:#f1f5f9">'
-            + TDl('<strong style="color:#334155">Нетто ожидаемые Приходы/Расходы (с НДС)</strong>')
-            + TD(fmtK(nB, true, true), ';color:#9ca3af')
-            + TD(fmtK(nF25, true, true), SEP + red(nF25)) + TD(fmtK(nF26, true, true), red(nF26))
-            + TD(fmtK(nFact, true, true), red(nFact))
-            + TD(fmtK(nOst, true, true), red(nOst))
-            + TD(fmtK(nEb, true, true), SEP + red(nEb)) + TD(fmtK(nH, true, true), red(nH)) + TD(fmtK(nCur, true, true), red(nCur))
-            + nPlan.map(function(v, i) { return TD(fmtK(v, true, true), (i === 0 ? SEP : '') + red(v)); }).join('')
-            + '</tr>'
-            + '<tr style="background:#f8fafc">'
-            + TDl('<em style="color:#475569">Ожидаемый НДС</em>')
-            + TD(dash(), ';color:#9ca3af')
-            + TD(fmtK(vF25, false, true), SEP) + TD(fmtK(vF26, false, true))
-            + TD(fmtK(vTot, true, true))
-            + TD(fmtK(vOst, false, true))
-            + TD(dash(), SEP) + TD(fmtK(vCurP, false, true)) + TD(fmtK(vCur, false, true))
-            + vPlan.map(function(v, i) { return TD(fmtK(v, false, true), i === 0 ? SEP : ''); }).join('')
-            + '</tr>'
-            + '<tr style="background:#f1f5f9">'
-            + TDl('<strong style="color:#334155">Нетто ожидаемые Приходы/Расходы (без НДС)</strong>')
-            + TD(dash(), ';color:#9ca3af')
-            + TD(dash(), SEP) + TD(dash())
-            + TD(dash())
-            + TD(fmtK(wOst, true, true), red(wOst))
-            + TD(dash(), SEP) + TD(dash()) + TD(dash())
-            + wPlan.map(function(v, i) { return TD(fmtK(v, true, true), (i === 0 ? SEP : '') + red(v)); }).join('')
-            + '</tr>';
+          function nRow(label, v, bold, bg) {
+            return '<tr style="background:' + bg + '">'
+              + TDl(label)
+              + TD('') + TD('', SEP) + TD('') + TD('')
+              + TD(fmtK(v, bold, true), v < 0 ? ';color:#dc2626' : '')
+              + TD('', SEP) + TD('') + TD('')
+              + [0,1,2,3,4,5].map(function(i) { return TD('', i === 0 ? SEP : ''); }).join('')
+              + '</tr>';
+          }
+          return nRow('<strong style="color:#334155">Нетто ожидаемые Приходы/Расходы (с НДС)</strong>', nOst, true, '#f1f5f9')
+            + nRow('<em style="color:#475569">Ожидаемый НДС</em>', vOst, false, '#f8fafc')
+            + nRow('<strong style="color:#334155">Нетто ожидаемые Приходы/Расходы (без НДС)</strong>', wOst, true, '#f1f5f9');
         })()
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
@@ -2854,7 +2844,46 @@
         });
         return Math.round(_calcVat - _factVat);
       })();
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff);
+      // Разница в плановом НДС от СМР (доход):
+      //   только фактические транзакции СМР тек. месяца, по которым фактический НДС (PLS 3144) = 22%:
+      //   Σ(сумма × 22/122) − Σ(сумма × 5/105).
+      // Привязка PLS → транзакция: plan_money_id + дата (запасной ключ: проект + дата) — как для материалов.
+      var _smrVatDiff = (function() {
+        var _curYM = yr * 100 + mo;
+        function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
+        function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
+        // Шаг 1: транзакции СМР тек. месяца, сгруппированные по ключу
+        var _byKey = {};
+        txns.forEach(function(tx) {
+          var dt = tx.date || '';
+          if (dt.length < 10 || _ym(dt) !== _curYM) return;
+          if (today && dt > today) return;
+          var amt = parseFloat(tx.outcome) || 0;
+          if (!amt) return;
+          if (!/^смр/i.test(catMap[tx.category_id] || '')) return;
+          var k = _key(tx.plan_money_id, tx.project_id, dt);
+          _byKey[k] = (_byKey[k] || 0) + amt;
+        });
+        // Шаг 2: фактический НДС по этим ключам (PLS 3144)
+        var _vatByKey = {};
+        (plsItems || []).forEach(function(p) {
+          if (p.category_id !== 3144 || p.project_id === 27) return;
+          var dt = p.date || '';
+          if (dt.length < 10 || _ym(dt) !== _curYM) return;
+          if (today && dt > today) return;
+          var k = _key(p.plan_money_id, p.project_id, dt);
+          if (!_byKey[k]) return;
+          _vatByKey[k] = (_vatByKey[k] || 0) + (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
+        });
+        // Шаг 3: берём только транзакции со ставкой 22% (НДС = сумма × 22/122, допуск 1%)
+        var amt22 = 0;
+        Object.keys(_byKey).forEach(function(k) {
+          var a = _byKey[k], v = _vatByKey[k] || 0;
+          if (Math.abs(v - a * 22 / 122) <= a * 22 / 122 * 0.01) amt22 += a;
+        });
+        return Math.round(amt22 * 22 / 122 - amt22 * 5 / 105);
+      })();
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
