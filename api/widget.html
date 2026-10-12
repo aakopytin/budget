@@ -1365,16 +1365,20 @@
     // Корректировка НДС: project_id=36 (Проект Корректировки НДС), org_account_id=149.
     // type=30 (доход = возврат НДС), type=40 (расход = НДС к уплате).
     // Диапазон: от начала текущего квартала до конца горизонта прогноза (включая dal).
-    var vatAdjInc = 0, vatAdjExp = 0;
+    // Дата в текущем квартале → текущий НДС (vatAdjCur); после текущего квартала → прогноз (vatAdjFut).
+    var vatAdjInc = 0, vatAdjExp = 0, vatAdjCur = 0, vatAdjFut = 0;
     var qStartYM = curYear * 100 + q0m;
+    var qEndYM   = curYear * 100 + q0m + 2;
     (planItems || []).forEach(function(item) {
       if (item.project_id !== 36) return;
       var dt = item.plan_paid_date || '';
       if (dt.length < 7) return;
       var pYM = parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7));
       if (pYM < qStartYM) return;  // раньше текущего квартала — не берём
+      var aV = (parseFloat(item.total) || 0) * (item.type === 30 ? 1 : item.type === 40 ? -1 : 0);
       if (item.type === 30) vatAdjInc += parseFloat(item.total) || 0;
       if (item.type === 40) vatAdjExp += parseFloat(item.total) || 0;
+      if (pYM <= qEndYM) vatAdjCur += aV; else vatAdjFut += aV;
     });
     var vatAdj = vatAdjInc - vatAdjExp;  // положительное = чистый возврат НДС (снижает к уплате)
 
@@ -1386,8 +1390,8 @@
     });
     vfTVI += dal.vatIn; vfTVO += dal.vatOut;
     // Формула: -НДС_поступлений + НДС_выплат + Корректировка_НДС.
-    // Корректировка — только плановая: в Факт не входит, в ИТОГО входит.
-    var vfFactVatRes  = -vfFVI + vfFVO;
+    // Корректировка текущего квартала входит в Факт (текущий НДС), более поздняя — только в ИТОГО.
+    var vfFactVatRes  = -vfFVI + vfFVO + vatAdjCur;
     var vfItogoVatRes = -vfTVI + vfTVO + vatAdj;
 
     return {data: data, dal: dal, cols: cols, curYM: curYM, q0m: q0m, dalYM: dalYM,
@@ -1395,7 +1399,7 @@
             pls3144count: pls3144count, pls3144trSum: pls3144trSum,
             pmMapKeys: pmMapKeys, effQLabel: effQLabel,
             rejectedIncCats: rejectedIncCats,
-            vatAdj: vatAdj,
+            vatAdj: vatAdj, vatAdjCur: vatAdjCur, vatAdjFut: vatAdjFut,
             vfFactVatRes: vfFactVatRes,
             vfItogoVatRes: vfItogoVatRes,
             vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, paidPmAmts: paidPmAmts, vfEbExpAdj: vfEbExpAdj,
@@ -1738,18 +1742,21 @@
       + '</tr>';
 
     // ── КОРРЕКТИРОВКА НДС ──
-    var vatAdj2 = vf.vatAdj || 0;
+    // Дата корректировки в текущем квартале → «Факт тек. квартал» (текущий НДС),
+    // после текущего квартала → «НДС Прогноз».
+    var vatAdjCur2 = vf.vatAdjCur || 0;
+    var vatAdjFut2 = vf.vatAdjFut || 0;
     rows2 += '<tr style="background:#fefce8">'
       + tdL('Корректировка НДС','#fefce8') + tdL('')
       + tdR('<span style="color:#d1d5db">—</span>')
-      + tdR(fkSign(vatAdj2), ';font-weight:600')
-      + tdR('<span style="color:#d1d5db">—</span>', ';background:#fef9c3')
+      + tdR(vatAdjFut2 ? fkSign(vatAdjFut2) : '<span style="color:#d1d5db">—</span>', ';font-weight:600')
+      + tdR(vatAdjCur2 ? fkSign(vatAdjCur2) : '<span style="color:#d1d5db">—</span>', ';background:#fef9c3;font-weight:600')
       + '</tr>';
 
     // ── ИТОГО НДС ──
     // Формула: -НДС_доходов + НДС_расходов + Корректировка. >0 = к уплате, <0 = к получению.
-    var factNet2  = -totIncVatFact2 + totExpVatFact2;
-    var progNet2  = -totIncVatProg2 + totExpVatProg2 + vatAdj2;
+    var factNet2  = -totIncVatFact2 + totExpVatFact2 + vatAdjCur2;
+    var progNet2  = -totIncVatProg2 + totExpVatProg2 + vatAdjFut2;
     var recvProg  = progNet2 <= 0 ? progNet2 : 0;
     var recvFact  = factNet2 <= 0 ? factNet2 : 0;
     var payProg   = progNet2 > 0  ? progNet2 : 0;
@@ -2243,7 +2250,8 @@
     var vatOutOst = (sd && sd.expVatProg) || 0;
     // НДС по платежам текущего квартала (= «Ожидаемый текущий НДС») и корректировки НДС (НДС Прогноз)
     var vatQFact = (sd && sd.vatFact) || 0;
-    var vatAdjQ  = (vf && vf.vatAdj) || 0;
+    // Корректировки: только после текущего квартала (корректировки тек. квартала уже в vatQFact)
+    var vatAdjQ  = (vf && vf.vatAdjFut) || 0;
     // Резерв = Поступления без НДС − Расходы без НДС + остаток ДС на дату + движение займов
     //          + НДС по платежам тек. квартала + Корректировки НДС
     var reserveTbl = (ti.ost - vatInOst) - (te.ost - vatOutOst) + tEnd0 + finNetOst + vatQFact + vatAdjQ;
@@ -2362,13 +2370,14 @@
           balSide('ИТОГО',       _sbB + _sbO + _sbT, true)
         ];
         var sideIdx = 0;
-        function sdRow(lbl, valHtml, valPrevHtml, diffHtml, bg) {
+        function sdRow(lbl, valHtml, valPrevHtml, diffHtml, bg, small) {
           var side = sideIdx < sideRows.length ? sideRows[sideIdx++] : null;
+          var fs = small ? ';font-size:10px' : '';   // шрифт на 1 меньше основного (11px)
           return '<tr' + (bg ? ' style="background:' + bg + '"' : '') + '>'
-            + '<td colspan="2" style="' + LS + (bg ? ';background:' + bg : '') + '">' + lbl + '</td>'
-            + '<td style="' + VS  + (bg ? ';background:' + bg : '') + '">' + valHtml + '</td>'
-            + '<td style="' + VSP + (bg ? ';background:' + bg : '') + '">' + (valPrevHtml || '') + '</td>'
-            + '<td style="' + VSD + (bg ? ';background:' + bg : '') + '">' + (diffHtml || '') + '</td>'
+            + '<td colspan="2" style="' + LS + (bg ? ';background:' + bg : '') + fs + '">' + lbl + '</td>'
+            + '<td style="' + VS  + (bg ? ';background:' + bg : '') + fs + '">' + valHtml + '</td>'
+            + '<td style="' + VSP + (bg ? ';background:' + bg : '') + fs + '">' + (valPrevHtml || '') + '</td>'
+            + '<td style="' + VSD + (bg ? ';background:' + bg : '') + fs + '">' + (diffHtml || '') + '</td>'
             + (side || '<td colspan="10" style="' + ES + (bg ? ';background:' + bg : '') + '"></td>')
             + '</tr>';
         }
@@ -2386,6 +2395,8 @@
           + sdRow('Текущий остаток ДС', fmtBal(sd.cashBalance, false), sdPrev ? fmtBal(sdPrev.cashBalance, false) : null, null)
           + sdRow('Ожидаемые приходы',      sdFmt(sd.incOst),    sdPrev ? sdFmt(sdPrev.incOst)    : null, null)
           + sdRow('Ожидаемые расходы',      sdFmt(-sd.expOst),   sdPrev ? sdFmt(-sdPrev.expOst)   : null, null)
+          // Справочная строка: в дальнейших расчётах таблицы не используется
+          + sdRow('Нетто Приходы/Расходы',  sdFmt(sd.incOst - sd.expOst), sdPrev ? sdFmt(sdPrev.incOst - sdPrev.expOst) : null, null, '', true)
           + sdRow('Выплата/Получение займов', sdFmtB(sd.finOst), sdPrev ? sdFmtB(sdPrev.finOst)   : null, null)
           + sdRow('Ожидаемый текущий НДС',  sdFmt(sd.vatFact),   sdPrev ? sdFmt(sdPrev.vatFact)   : null, null)
           + sdRow('Ожидаемый плановый НДС', sdFmt(sd.vatPlan),   sdPrev ? sdFmt(sdPrev.vatPlan)   : null, null)
@@ -2486,6 +2497,54 @@
       + TD(dash(), SEP) + TD(dash()) + TD(dash())
       + vatOutPlan.map(function(v, i) { return TD(fmtK(te.plan[i] - v, true), i === 0 ? SEP : ''); }).join('')
       + '</tr>'
+
+      // Узкий разделитель
+      + '<tr><td colspan="15" style="height:4px;padding:0;background:#e8edf3;border:none"></td></tr>'
+
+      // НЕТТО: Приходы − Расходы
+      // с НДС = ИТОГО ДОХОДЫ − ИТОГО РАСХОДЫ
+      + (function() {
+          var nB = ti.b - te.b, nF25 = ti.f25 - te.f25, nF26 = ti.f26 - te.f26, nFact = ti.fact - te.fact;
+          var nOst = ti.ost - te.ost, nEb = ti.fH_eb - te.fH_eb, nH = ti.fH - te.fH, nCur = ti.fCur - te.fCur;
+          var nPlan = ti.plan.map(function(v, i) { return v - te.plan[i]; });
+          // Ожидаемый НДС = НДС с поступлений − НДС с выплат
+          var vF25 = vatD.in_25 - vatD.out_25, vF26 = vatD.in_26 - vatD.out_26, vTot = vatInTot - vatOutTot;
+          var vOst = vatInOst - vatOutOst, vCurP = vatInCurPlan - vatOutCurPlan, vCur = vatD.in_cur - vatD.out_cur;
+          var vPlan = vatInPlan.map(function(v, i) { return v - vatOutPlan[i]; });
+          // без НДС = Поступления без НДС − Расходы без НДС
+          var wOst = nOst - vOst;
+          var wPlan = nPlan.map(function(v, i) { return v - vPlan[i]; });
+          if (sd && Math.abs(nOst - (sd.incOst - sd.expOst)) > 1)
+            console.warn('[Нетто] Остаток с НДС', Math.round(nOst), '≠ прогноз ДС', Math.round(sd.incOst - sd.expOst));
+          var red = function(v) { return v < 0 ? ';color:#dc2626' : ''; };
+          return '<tr style="background:#f1f5f9">'
+            + TDl('<strong style="color:#334155">Нетто ожидаемые Приходы/Расходы (с НДС)</strong>')
+            + TD(fmtK(nB, true, true), ';color:#9ca3af')
+            + TD(fmtK(nF25, true, true), SEP + red(nF25)) + TD(fmtK(nF26, true, true), red(nF26))
+            + TD(fmtK(nFact, true, true), red(nFact))
+            + TD(fmtK(nOst, true, true), red(nOst))
+            + TD(fmtK(nEb, true, true), SEP + red(nEb)) + TD(fmtK(nH, true, true), red(nH)) + TD(fmtK(nCur, true, true), red(nCur))
+            + nPlan.map(function(v, i) { return TD(fmtK(v, true, true), (i === 0 ? SEP : '') + red(v)); }).join('')
+            + '</tr>'
+            + '<tr style="background:#f8fafc">'
+            + TDl('<em style="color:#475569">Ожидаемый НДС</em>')
+            + TD(dash(), ';color:#9ca3af')
+            + TD(fmtK(vF25, false, true), SEP) + TD(fmtK(vF26, false, true))
+            + TD(fmtK(vTot, true, true))
+            + TD(fmtK(vOst, false, true))
+            + TD(dash(), SEP) + TD(fmtK(vCurP, false, true)) + TD(fmtK(vCur, false, true))
+            + vPlan.map(function(v, i) { return TD(fmtK(v, false, true), i === 0 ? SEP : ''); }).join('')
+            + '</tr>'
+            + '<tr style="background:#f1f5f9">'
+            + TDl('<strong style="color:#334155">Нетто ожидаемые Приходы/Расходы (без НДС)</strong>')
+            + TD(dash(), ';color:#9ca3af')
+            + TD(dash(), SEP) + TD(dash())
+            + TD(dash())
+            + TD(fmtK(wOst, true, true), red(wOst))
+            + TD(dash(), SEP) + TD(dash()) + TD(dash())
+            + wPlan.map(function(v, i) { return TD(fmtK(v, true, true), (i === 0 ? SEP : '') + red(v)); }).join('')
+            + '</tr>';
+        })()
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
       + sectionHdr('ПОЛУЧЕНИЕ/ВЫДАЧА ЗАЙМОВ', '#f0f4ff', '#3730a3', '#c7d2fe')
