@@ -1782,7 +1782,7 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts) {
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
     paidPmIds = paidPmIds || {};
@@ -1885,7 +1885,10 @@
       var sSign  = smrDiff > 0 ? '+ ' : '- ';
       var sColor = smrDiff > 0 ? '#15803d' : '#dc2626';
       vatDiffRow += '<tr style="background:#fffbeb">'
-        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic">Разница в плановом НДС от СМР</td>'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic"'
+        + (smrParts ? ' title="Ставка 22% (кроме Голутвинского): ' + fmtFull(smrParts.p22) + ' · Ставка 0% (кроме Голутвинского): ' + fmtFull(smrParts.p0)
+                    + ' · Голутвинский (НДС ≠ 0%): ' + fmtFull(smrParts.gol) + '"' : '')
+        + '>Разница в плановом НДС от СМР</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
         + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
@@ -2844,16 +2847,21 @@
         });
         return Math.round(_calcVat - _factVat);
       })();
-      // Разница в плановом НДС от СМР (доход):
-      //   только фактические транзакции СМР тек. месяца, по которым фактический НДС (PLS 3144) = 22%:
-      //   Σ(сумма × 22/122) − Σ(сумма × 5/105).
+      // Разница в плановом НДС от СМР — фактические транзакции СМР тек. месяца, ставка по факту (PLS 3144):
+      //   Все проекты, кроме Голутвинского (pid=33), план по ставке 5%:
+      //     ставка 22% → + Σ(сумма × 22/122) − Σ(сумма × 5/105)
+      //     ставка 0%  → − Σ(сумма × 5/105)            (как для материалов: расчётный НДС − факт, факт = 0)
+      //     ставка 5%  → 0
+      //   Голутвинский, план по ставке 0%: + фактический НДС по транзакциям СМР со ставкой 22% или 5%.
       // Привязка PLS → транзакция: plan_money_id + дата (запасной ключ: проект + дата) — как для материалов.
+      var _smrParts = {p22: 0, p0: 0, gol: 0};
       var _smrVatDiff = (function() {
+        var GOL_PID = 33;
         var _curYM = yr * 100 + mo;
         function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
         function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
-        // Шаг 1: транзакции СМР тек. месяца, сгруппированные по ключу
-        var _byKey = {};
+        // Шаг 1: транзакции СМР тек. месяца по ключу
+        var _byKey = {}, _pidByKey = {};
         txns.forEach(function(tx) {
           var dt = tx.date || '';
           if (dt.length < 10 || _ym(dt) !== _curYM) return;
@@ -2863,6 +2871,7 @@
           if (!/^смр/i.test(catMap[tx.category_id] || '')) return;
           var k = _key(tx.plan_money_id, tx.project_id, dt);
           _byKey[k] = (_byKey[k] || 0) + amt;
+          _pidByKey[k] = +tx.project_id;
         });
         // Шаг 2: фактический НДС по этим ключам (PLS 3144)
         var _vatByKey = {};
@@ -2875,15 +2884,24 @@
           if (!_byKey[k]) return;
           _vatByKey[k] = (_vatByKey[k] || 0) + (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
         });
-        // Шаг 3: берём только транзакции со ставкой 22% (НДС = сумма × 22/122, допуск 1%)
-        var amt22 = 0;
+        // Шаг 3: классификация по фактической ставке
         Object.keys(_byKey).forEach(function(k) {
           var a = _byKey[k], v = _vatByKey[k] || 0;
-          if (Math.abs(v - a * 22 / 122) <= a * 22 / 122 * 0.01) amt22 += a;
+          var is0  = Math.abs(v) < 1;
+          var is22 = Math.abs(v - a * 22 / 122) <= a * 22 / 122 * 0.01;
+          if (_pidByKey[k] !== GOL_PID) {
+            if (is22)     _smrParts.p22 += a * 22 / 122 - a * 5 / 105;
+            else if (is0) _smrParts.p0  -= a * 5 / 105;
+          } else if (!is0) {
+            _smrParts.gol += v;
+          }
         });
-        return Math.round(amt22 * 22 / 122 - amt22 * 5 / 105);
+        _smrParts.p22 = Math.round(_smrParts.p22);
+        _smrParts.p0  = Math.round(_smrParts.p0);
+        _smrParts.gol = Math.round(_smrParts.gol);
+        return _smrParts.p22 + _smrParts.p0 + _smrParts.gol;
       })();
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff);
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
