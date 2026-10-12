@@ -1198,6 +1198,7 @@
     });
     var paidPmIds = {};
     var paidPmAmts = {};
+    var paidPmOuts = {};   // фактические расходы по оплаченным ВБ-позициям (outcome)
     txns.forEach(function(tx) {
       var pmId = tx.plan_money_id;
       if (!pmId || !ebPlanIds[pmId]) return;
@@ -1205,6 +1206,7 @@
       if (!today || dt <= today) {
         paidPmIds[pmId] = true;
         paidPmAmts[pmId] = (paidPmAmts[pmId] || 0) + (parseFloat(tx.income) || 0);
+        paidPmOuts[pmId] = (paidPmOuts[pmId] || 0) + (parseFloat(tx.outcome) || 0);
       }
     });
 
@@ -1414,7 +1416,7 @@
             vatAdj: vatAdj, vatAdjCur: vatAdjCur, vatAdjFut: vatAdjFut,
             vfFactVatRes: vfFactVatRes,
             vfItogoVatRes: vfItogoVatRes,
-            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, paidPmAmts: paidPmAmts, vfEbExpAdj: vfEbExpAdj,
+            vfEbVatAdj: vfEbVatAdj, ebPmVatMap: ebPmVatMap, paidPmIds: paidPmIds, paidPmAmts: paidPmAmts, paidPmOuts: paidPmOuts, vfEbExpAdj: vfEbExpAdj,
             expFactCurByProj: expFactCurByProj,
             planMoneySubTypeMap: planMoneySubTypeMap};
   }
@@ -1794,7 +1796,8 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts) {
+    paidPmOuts = paidPmOuts || {};
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
     paidPmIds = paidPmIds || {};
@@ -1815,8 +1818,8 @@
     var fmtFull = function(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); };
     var fmtK    = function(v) { return new Intl.NumberFormat('ru-RU').format(Math.round((v || 0) / 1000)); };
 
-    function ebVat(item) {
-      var amt = item.total || 0;
+    function ebVat(item, amtFact) {
+      var amt = (amtFact !== undefined) ? amtFact : (item.total || 0);
       var catName = catMap[item.category_id] || '';
       // Оплачен — берём реальный НДС из PLS cat=3144/3147.
       // Для расходов (type=40): PLS 3144 ведётся → доверяем PLS даже если 0 (ИП, нулевая ставка).
@@ -1850,8 +1853,10 @@
       var proj = PID_MAP[item.project_id] || ('id:' + item.project_id);
       var name = item.name || item.note || cat;
       var isExp = item.type === 40;
-      var amt   = (!isExp && paidPmIds[item.id]) ? (paidPmAmts[item.id] || item.total || 0) : (item.total || 0);
-      var v = ebVat(item);
+      // Оплаченные позиции — фактическая сумма (доход: поступления, расход: выплаты); неоплаченные — план
+      var amt   = !paidPmIds[item.id] ? (item.total || 0)
+                : (isExp ? (paidPmOuts[item.id] || item.total || 0) : (paidPmAmts[item.id] || item.total || 0));
+      var v = ebVat(item, amt);
       var sign = isExp ? 1 : -1;
       totAmt += sign * amt; totNet += sign * v.net; totVat += sign * v.vat;
       return '<tr>'
@@ -2913,7 +2918,7 @@
         _smrParts.gol = Math.round(_smrParts.gol);
         return _smrParts.p22 + _smrParts.p0 + _smrParts.gol;
       })();
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts);
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {});
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
