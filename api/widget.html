@@ -1796,7 +1796,7 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts, offVatFact) {
     paidPmOuts = paidPmOuts || {};
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
@@ -1844,6 +1844,7 @@
 
     var totVatDiff = Math.round(matVatDiff || 0);
     var smrDiff    = Math.round(smrVatDiff || 0);   // доход (+): уменьшает итог расходов
+    var offVat     = Math.round(offVatFact || 0);   // НДС по офису (план 0) — весь факт к возмещению, доход (+)
     var totAmt = 0, totNet = 0, totVat = 0;
         var rows = items.map(function(item) {
       var dt = item.plan_paid_date || '';
@@ -1872,8 +1873,8 @@
     }).join('');
 
     // Итого с учётом разницы в НДС по материалам
-    var grandAmt  = totAmt  + totVatDiff - smrDiff;
-    var grandNet  = totNet  + totVatDiff - smrDiff;  // разницы идут в «Без НДС»
+    var grandAmt  = totAmt  + totVatDiff - smrDiff - offVat;
+    var grandNet  = totNet  + totVatDiff - smrDiff - offVat;  // разницы идут в «Без НДС»
     var totSign   = grandAmt >= 0 ? '- ' : '+ ';
     var totColor  = grandAmt >= 0 ? '#dc2626' : '#15803d';
     var totalRow  = '<tr style="background:#f3f4f6;font-weight:600">'
@@ -1910,6 +1911,20 @@
         + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
         + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
+        + '<td></td>'
+        + '</tr>';
+    }
+    // НДС по офису: фактический НДС к вычету по расходам офиса (ВСИП + ТТ) тек. месяца.
+    // Плановый НДС по офису = 0, поэтому весь факт — к возмещению (доход, «+»).
+    if (offVat !== 0) {
+      var oSign  = offVat > 0 ? '+ ' : '- ';
+      var oColor = offVat > 0 ? '#15803d' : '#dc2626';
+      vatDiffRow += '<tr style="background:#fffbeb">'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic">НДС по офису</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + oColor + ';white-space:nowrap">'
+        + oSign + fmtFull(Math.abs(offVat)) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + oColor + ';white-space:nowrap">'
+        + oSign + fmtFull(Math.abs(offVat)) + '</td>'
         + '<td></td>'
         + '</tr>';
     }
@@ -2918,7 +2933,13 @@
         _smrParts.gol = Math.round(_smrParts.gol);
         return _smrParts.p22 + _smrParts.p0 + _smrParts.gol;
       })();
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {});
+      // НДС по офису: фактический НДС (PLS 3144) по расходам «Офис (ВСИП+ТТ)» за текущий месяц —
+      // берётся из факта НДС Прогноза (без ЕНП/уплаты НДС в бюджет и переводов ВСИП↔ТТ).
+      var _offVatFact = 0;
+      ((vf && vf.data) || []).forEach(function(c) {
+        if (c.isCurrent) _offVatFact += (c.vatOutByProj && c.vatOutByProj['Офис (ВСИП+ТТ)']) || 0;
+      });
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {}, _offVatFact);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
