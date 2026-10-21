@@ -1903,8 +1903,9 @@
       var sColor = smrDiff > 0 ? '#15803d' : '#dc2626';
       vatDiffRow += '<tr style="background:#fffbeb">'
         + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic"'
-        + (smrParts ? ' title="Ставка 22% (кроме Голутвинского): ' + fmtFull(smrParts.p22) + ' · Ставка 0% (кроме Голутвинского): ' + fmtFull(smrParts.p0)
-                    + ' · Голутвинский (НДС ≠ 0%): ' + fmtFull(smrParts.gol) + '"' : '')
+        + (smrParts ? ' title="Факт ≤ плана с НДС — ставка 22%: ' + fmtFull(smrParts.p22) + ' · ставка 0%: ' + fmtFull(smrParts.p0)
+                    + '&#10;Факт > плана с НДС (факт. НДС − план с НДС × 5/105): ' + fmtFull(smrParts.exc)
+                    + (smrParts.excList && smrParts.excList.length ? '&#10;' + smrParts.excList.join('&#10;') : '') + '"' : '')
         + '>Разница в плановом НДС от СМР</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
         + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
@@ -2864,19 +2865,27 @@
         });
         return Math.round(_calcVat - _factVat);
       })();
-      // Разница в плановом НДС от СМР — фактические транзакции СМР тек. месяца, ставка по факту (PLS 3144):
-      //   Все проекты, кроме Голутвинского (pid=33), план по ставке 5%:
-      //     ставка 22% → + Σ(сумма × 22/122) − Σ(сумма × 5/105)
-      //     ставка 0%  → − Σ(сумма × 5/105)            (как для материалов: расчётный НДС − факт, факт = 0)
-      //     ставка 5%  → 0
-      //   Голутвинский, план по ставке 0%: + фактический НДС по транзакциям СМР со ставкой 22% или 5%.
+      // Разница в плановом НДС от СМР — фактические транзакции СМР тек. месяца, ставка по факту (PLS 3144).
+      // План СМР «с НДС» — по ставке 5%, «без НДС» — 0%.
+      // По каждому проекту (включая Голутвинский):
+      //   Факт      = Σ платежей СМР тек. месяца (все ставки); Факт с НДС — только со ставкой 22% или 5%;
+      //   План с НДС = Σ плановых платежей тек. месяца (Бюджетный + Внебюджетный лимит, 36+150)
+      //                по категориям СМР без «без НДС».
+      //   1) Факт ≤ План с НДС:
+      //        ставка 22% → + Σ(сумма × 22/122) − Σ(сумма × 5/105)
+      //        ставка 0%  → − Σ(сумма × 5/105)
+      //        ставка 5%  → 0
+      //   2) Факт > План с НДС (в т.ч. превышение Факта с НДС над Планом с НДС; Голутвинский — План с НДС = 0):
+      //        поправка = фактический НДС (22% и 5%) − План с НДС × 5/105.
+      //      При Факте с НДС > Плана с НДС платежи 0% не учитываются (План с НДС закрыт платежами с НДС).
       // Привязка PLS → транзакция: plan_money_id + дата (запасной ключ: проект + дата) — как для материалов.
-      var _smrParts = {p22: 0, p0: 0, gol: 0};
+      var _smrParts = {p22: 0, p0: 0, exc: 0, excList: []};
       var _smrVatDiff = (function() {
-        var GOL_PID = 33;
         var _curYM = yr * 100 + mo;
         function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
         function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
+        function _f(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); }
+        function _prj(pid) { return PID_MAP[pid] || ('pid ' + pid); }
         // Шаг 1: транзакции СМР тек. месяца по ключу
         var _byKey = {}, _pidByKey = {};
         txns.forEach(function(tx) {
@@ -2901,22 +2910,48 @@
           if (!_byKey[k]) return;
           _vatByKey[k] = (_vatByKey[k] || 0) + (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
         });
-        // Шаг 3: классификация по фактической ставке
+        // Шаг 3: план СМР с НДС тек. месяца по проекту (36 + 150)
+        var _planVat = {};
+        (planItems || []).forEach(function(item) {
+          if (item.type !== 40) return;
+          if (item.org_account_id !== 36 && item.org_account_id !== 150) return;
+          var dt = item.plan_paid_date || '';
+          if (dt.length < 7 || _ym(dt) !== _curYM) return;
+          var cn = catMap[item.category_id] || '';
+          if (!/^смр/i.test(cn) || cn.toLowerCase().indexOf('без ндс') >= 0) return;
+          var pj = _prj(+item.project_id);
+          _planVat[pj] = (_planVat[pj] || 0) + (parseFloat(item.total) || 0);
+        });
+        // Шаг 4: по проекту — факт по ставкам
+        var _P = {};
         Object.keys(_byKey).forEach(function(k) {
           var a = _byKey[k], v = _vatByKey[k] || 0;
+          var pj = _prj(_pidByKey[k]);
+          var P = _P[pj] || (_P[pj] = {fAll: 0, fVat: 0, vat: 0, p22: 0, p0: 0});
+          P.fAll += a;
           var is0  = Math.abs(v) < 1;
           var is22 = Math.abs(v - a * 22 / 122) <= a * 22 / 122 * 0.01;
-          if (_pidByKey[k] !== GOL_PID) {
-            if (is22)     _smrParts.p22 += a * 22 / 122 - a * 5 / 105;
-            else if (is0) _smrParts.p0  -= a * 5 / 105;
-          } else if (!is0) {
-            _smrParts.gol += v;
+          if (!is0) { P.fVat += a; P.vat += v; }
+          if (is22)     P.p22 += a * 22 / 122 - a * 5 / 105;
+          else if (is0) P.p0  -= a * 5 / 105;
+        });
+        // Шаг 5: правило превышения плана с НДС
+        Object.keys(_P).forEach(function(pj) {
+          var P = _P[pj], plan = _planVat[pj] || 0;
+          if (P.fAll > plan) {
+            var d = P.vat - plan * 5 / 105;
+            _smrParts.exc += d;
+            _smrParts.excList.push(pj + ': факт ' + _f(P.fAll) + ' (с НДС ' + _f(P.fVat) + ') > план с НДС ' + _f(plan)
+              + ' → НДС ' + _f(Math.round(P.vat)) + ' − ' + _f(Math.round(plan * 5 / 105)) + ' = ' + _f(Math.round(d)));
+          } else {
+            _smrParts.p22 += P.p22;
+            _smrParts.p0  += P.p0;
           }
         });
         _smrParts.p22 = Math.round(_smrParts.p22);
         _smrParts.p0  = Math.round(_smrParts.p0);
-        _smrParts.gol = Math.round(_smrParts.gol);
-        return _smrParts.p22 + _smrParts.p0 + _smrParts.gol;
+        _smrParts.exc = Math.round(_smrParts.exc);
+        return _smrParts.p22 + _smrParts.p0 + _smrParts.exc;
       })();
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {});
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
