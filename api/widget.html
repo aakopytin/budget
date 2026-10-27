@@ -1796,7 +1796,8 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts, smVat) {
+    smVat = smVat || {exp: 0, inc: 0};
     paidPmOuts = paidPmOuts || {};
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
@@ -1872,8 +1873,9 @@
     }).join('');
 
     // Итого с учётом разницы в НДС по материалам
-    var grandAmt  = totAmt  + totVatDiff - smrDiff;
-    var grandNet  = totNet  + totVatDiff - smrDiff;  // разницы идут в «Без НДС»
+    var smDiff    = (smVat.exp || 0) - (smVat.inc || 0);   // НДС от Проекта СМ: доход (+)
+    var grandAmt  = totAmt  + totVatDiff - smrDiff - smDiff;
+    var grandNet  = totNet  + totVatDiff - smrDiff - smDiff;  // разницы идут в «Без НДС»
     var totSign   = grandAmt >= 0 ? '- ' : '+ ';
     var totColor  = grandAmt >= 0 ? '#dc2626' : '#15803d';
     var totalRow  = '<tr style="background:#f3f4f6;font-weight:600">'
@@ -1915,6 +1917,21 @@
         + '</tr>';
     }
 
+    // НДС от Проекта СМ: + НДС от расходов − НДС от доходов (фактические транзакции тек. месяца)
+    if (smDiff !== 0) {
+      var mSign  = smDiff > 0 ? '+ ' : '- ';
+      var mColor = smDiff > 0 ? '#15803d' : '#dc2626';
+      vatDiffRow += '<tr style="background:#fffbeb">'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic"'
+        + ' title="НДС от расходов (PLS 3144): + ' + fmtFull(smVat.exp) + ' · НДС от доходов (PLS 3147): − ' + fmtFull(smVat.inc) + '"'
+        + '>НДС от Проекта СМ</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + mColor + ';white-space:nowrap">'
+        + mSign + fmtFull(Math.abs(smDiff)) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + mColor + ';white-space:nowrap">'
+        + mSign + fmtFull(Math.abs(smDiff)) + '</td>'
+        + '<td></td>'
+        + '</tr>';
+    }
     return '<details style="margin-top:6px;font-family:sans-serif;max-width:50%">'
       + '<summary style="cursor:pointer;padding:5px 8px;font-size:10.5px;color:#6b7280;'
       + 'list-style:none;-webkit-appearance:none;user-select:none;background:#f8f9fd;'
@@ -2833,8 +2850,13 @@
 
       // Разница в плановом НДС от материалов:
       //   Σ(материальные транзакции тек. месяца × 22/122) − Σ(фактический НДС из PLS 3144 по этим транзакциям)
+      // Не включаются: внебюджетные транзакции (plan_money на счёте Внебюджетный лимит, org_account_id=150)
+      //                и транзакции Проекта СМ (project_id=28) — для него отдельная строка «НДС от Проекта СМ».
       // Привязка PLS → транзакция: plan_money_id + дата (reference_id PLS НЕ равен id транзакции).
       // Если у транзакции/PLS plan_money_id = 0 — запасной ключ: проект + дата.
+      var SM_PID = 28;   // Проект СМ
+      var _ebPmIds = {};
+      (planItems || []).forEach(function(i) { if (i.org_account_id === 150 && i.id) _ebPmIds[i.id] = true; });
       var _matVatDiff = (function() {
         var _curYM = yr * 100 + mo;
         function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
@@ -2849,6 +2871,8 @@
           if (!expAmt) return;
           var catName = catMap[tx.category_id] || '';
           if (!/^мат/i.test(catName)) return;   // только Материал*/Мат*/мат* категории
+          if (+tx.project_id === SM_PID) return;          // Проект СМ — отдельной строкой
+          if (+tx.plan_money_id > 0 && _ebPmIds[tx.plan_money_id]) return;  // внебюджетные транзакции
           _calcVat += expAmt * 22 / 122;
           _keys[_key(tx.plan_money_id, tx.project_id, dt)] = 1;
         });
@@ -2857,6 +2881,7 @@
         (plsItems || []).forEach(function(p) {
           if (p.category_id !== 3144) return;
           if (p.project_id === 27) return;          // исключаем переводы ВСИП↔ТТ
+          if (+p.project_id === SM_PID) return;     // Проект СМ — отдельной строкой
           var dt = p.date || '';
           if (dt.length < 10 || _ym(dt) !== _curYM) return;
           if (today && dt > today) return;
@@ -2953,7 +2978,23 @@
         _smrParts.exc = Math.round(_smrParts.exc);
         return _smrParts.p22 + _smrParts.p0 + _smrParts.exc;
       })();
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {});
+      // НДС от Проекта СМ (project_id=28) — весь НДС фактических транзакций тек. месяца (PLS), с обратным знаком:
+      //   НДС от расходов (PLS 3144) — «+» (доход), НДС от доходов (PLS 3147) — «−».
+      var _smVat = {exp: 0, inc: 0};
+      (function() {
+        var _curYM = yr * 100 + mo;
+        (plsItems || []).forEach(function(p) {
+          if (+p.project_id !== SM_PID) return;
+          if (p.category_id !== 3144 && p.category_id !== 3147) return;
+          var dt = p.date || '';
+          if (dt.length < 10 || (parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7))) !== _curYM) return;
+          if (today && dt > today) return;
+          if (p.category_id === 3144) _smVat.exp += (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
+          else                        _smVat.inc += (parseFloat(p.income) || 0) - (parseFloat(p.outcome) || 0);
+        });
+        _smVat.exp = Math.round(_smVat.exp); _smVat.inc = Math.round(_smVat.inc);
+      })();
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {}, _smVat);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
