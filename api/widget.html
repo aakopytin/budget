@@ -541,7 +541,7 @@
     var acc = {};
     PROJECTS.forEach(function(p) {
       acc[p] = { i25:0, e25:0, i26:0, e26:0, iCur:0, eCur:0,
-                 eCurByType:{mat:0,smr:0,smrZ:0,other:0} };
+                 eCurByType:{mat:0,smr:0,smrZ:0,other:0}, eCurRet:0 };
     });
 
     // Финансовая деятельность (только проекты 24 и 26)
@@ -649,6 +649,7 @@
             a.eCur += expAmt;
             var _st = expSubType(typeName);
             a.eCurByType[_st] = (a.eCurByType[_st] || 0) + expAmt;
+            if (getExpCatType(typeName) === 'ret') a.eCurRet += expAmt;   // возвраты покупателям
           }
         }
       }
@@ -687,7 +688,7 @@
                 bi_eb:0, be_eb:0, hI_eb:0, hE_eb:0,
                 plan_i:[0,0,0,0,0,0], plan_e:[0,0,0,0,0,0],
                 bePlanByType:{mat:0,smr:0,smrZ:0,other:0},
-                beEbByType:{mat:0,smr:0,smrZ:0,other:0} };
+                beEbByType:{mat:0,smr:0,smrZ:0,other:0}, beRet:0, beEbRet:0 };
     });
     var offBrkPlan = {};
     OFF_SUBCATS.forEach(function(s) {
@@ -740,6 +741,7 @@
           d.be_plan += val;
           var _stp = expSubType(catName);
           d.bePlanByType[_stp] = (d.bePlanByType[_stp] || 0) + val;
+          if (getExpCatType(catName) === 'ret') d.beRet += val;   // возвраты покупателям
         }
       }
       if (iy === curYear && im === curMonth) {
@@ -830,6 +832,7 @@
           d.be_eb += val;
           var _steb = expSubType(catNameEb);
           d.beEbByType[_steb] = (d.beEbByType[_steb] || 0) + val;
+          if (getExpCatType(catNameEb) === 'ret') d.beEbRet += val;
         }
       }
       if (iy === curYear && im === curMonth) {
@@ -1469,7 +1472,9 @@
   // НДС ПРОГНОЗ — РАЗБИВКА ПО СТАТЬЯМ (новая таблица по Макету9)
   // Колонки: Строка | Субстатья | Остаток | НДС Прогноз | НДС Факт тек.квартал
   // ═══════════════════════════════════════════════════════════════════════════
-  function buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan) {
+  // noEb = true — база на начало месяца: внебюджетные позиции (счёт 150) не участвуют ни в остатках, ни в плановом НДС
+  //   (в ожидаемых доходах/расходах базы их тоже нет).
+  function buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan, noEb) {
     if (!vf || !pm || !factResult) return '';
     var acc2     = factResult.acc;
     var SUBTYPES = ['mat','smr','smrZ','other'];
@@ -1541,20 +1546,26 @@
         ? a.i25 + (a.i26 - a.iCur) + d.bi_plan
         : a.e25 + (a.e26 - a.eCur) + d.be_plan;
       var planPart = type === 'inc' ? d.bi_plan : d.be_plan;
-      var eb = type === 'inc' ? (d.bi_eb || 0) : (d.be_eb || 0);
+      var eb = noEb ? 0 : (type === 'inc' ? (d.bi_eb || 0) : (d.be_eb || 0));
       var fact = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
       return (b + eb === 0 || (!planPart && !eb)) ? 0 : b + eb - fact;
     }
     function projOstByType2(p, st) {
       var d = pm[p], a = acc2[p];
       if (!d || !a) return 0;
-      return ((d.bePlanByType || {})[st] || 0) + ((d.beEbByType || {})[st] || 0) - ((a.eCurByType || {})[st] || 0);
+      return ((d.bePlanByType || {})[st] || 0) + (noEb ? 0 : ((d.beEbByType || {})[st] || 0)) - ((a.eCurByType || {})[st] || 0);
+    }
+    // Остаток по возвратам покупателям (входят в субтип «Прочие»)
+    function projRetOst2(p) {
+      var d = pm[p], a = acc2[p];
+      if (!d || !a) return 0;
+      return (d.beRet || 0) + (noEb ? 0 : (d.beEbRet || 0)) - (a.eCurRet || 0);
     }
     function groupOst2(projName) {
       var d = pm[projName], a = acc2[projName];
       if (!d || !a) return 0;
       var b = a.e25 + (a.e26 - a.eCur) + d.be_plan;
-      var eb = d.be_eb || 0, fact = a.e25 + a.e26;
+      var eb = noEb ? 0 : (d.be_eb || 0), fact = a.e25 + a.e26;
       return (b + eb === 0 || (!d.be_plan && !eb)) ? 0 : b + eb - fact;
     }
 
@@ -1637,7 +1648,14 @@
         if (s === 'mat')       { stVatPr = Math.round(stOst * 22/122); }
         else if (s === 'smr')  { stVatPr = Math.round(stOst * 5/105); }
         else if (s === 'smrZ') { stVatPr = 0; }
-        else { stVatPr = 0; }   // прочие проектные расходы: плановая ставка НДС 0%
+        else {
+          // Прочие проектные расходы: плановая ставка НДС 0%, кроме возвратов покупателям —
+          // по ним прежняя ставка (НДС плана «Прочие» / план «Прочие», не выше 22/122; по умолчанию proj_other или 22/122).
+          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0);
+          var vatPlanOth = ((progVatOutByProjByType[p] || {})['other'] || 0);
+          var rateOth    = (planOth > 0 && vatPlanOth > 0) ? Math.min(vatPlanOth / planOth, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
+          stVatPr = Math.round(projRetOst2(p) * rateOth);
+        }
         pVatPr += stVatPr;
         if (!stOst && !stVatPr && !stVatFa) return;
         subRowsHtml += '<tr>'
@@ -1685,7 +1703,7 @@
     });
     function _offOst(code) {
       var obp = offBrkPlan ? offBrkPlan[code] : null;
-      var plan = obp ? (obp.be_plan || 0) + (obp.be_eb || 0) : 0;
+      var plan = obp ? (obp.be_plan || 0) + (noEb ? 0 : (obp.be_eb || 0)) : 0;
       var fCur = (_offBrkF[code] && _offBrkF[code].fCur) || 0;
       return plan ? plan - fCur : 0;   // как groupOst2: без плана остаток = 0
     }
@@ -2807,7 +2825,7 @@
         var _pIncOst  = _sumOstP('inc', _projNoEP);
         var _pExpOst  = _sumOstP('exp') - _pEpIncOst;
         var _pFinOst  = _skInOP - _skOutOP;
-        var _vfP2     = buildVatForecastTable2(_vfP, pm, _frP, offBrkPlan, epBrkPlan);
+        var _vfP2     = buildVatForecastTable2(_vfP, pm, _frP, offBrkPlan, epBrkPlan, true);  // база: без внебюджета
         var _pVatFact = _vfP2.vatFact;
         var _pVatPlan = _vfP2.vatPlan;
         _sdPrev = {
