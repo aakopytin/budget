@@ -1905,9 +1905,7 @@
       var sColor = smrDiff > 0 ? '#15803d' : '#dc2626';
       vatDiffRow += '<tr style="background:#fffbeb">'
         + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic"'
-        + (smrParts ? ' title="Факт ≤ плана с НДС — ставка 22%: ' + fmtFull(smrParts.p22) + ' · ставка 0%: ' + fmtFull(smrParts.p0)
-                    + '&#10;Факт > плана с НДС (факт. НДС − план с НДС × 5/105): ' + fmtFull(smrParts.exc)
-                    + (smrParts.excList && smrParts.excList.length ? '&#10;' + smrParts.excList.join('&#10;') : '') + '"' : '')
+        + (smrParts && smrParts.list && smrParts.list.length ? ' title="' + smrParts.list.join('&#10;') + '"' : '')
         + '>Разница в плановом НДС от СМР</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + sColor + ';white-space:nowrap">'
         + sSign + fmtFull(Math.abs(smrDiff)) + '</td>'
@@ -2890,93 +2888,81 @@
         });
         return Math.round(_calcVat - _factVat);
       })();
-      // Разница в плановом НДС от СМР — фактические транзакции СМР тек. месяца, ставка по факту (PLS 3144).
-      // План СМР «с НДС» — по ставке 5%, «без НДС» — 0%.
-      // По каждому проекту (включая Голутвинский):
-      //   Факт      = Σ платежей СМР тек. месяца (все ставки); Факт с НДС — только со ставкой 22% или 5%;
-      //   План с НДС = Σ плановых платежей тек. месяца (Бюджетный + Внебюджетный лимит, 36+150)
-      //                по категориям СМР без «без НДС».
-      //   1) Факт ≤ План с НДС:
-      //        ставка 22% → + Σ(сумма × 22/122) − Σ(сумма × 5/105)
-      //        ставка 0%  → − Σ(сумма × 5/105)
-      //        ставка 5%  → 0
-      //   2) Факт > План с НДС (в т.ч. превышение Факта с НДС над Планом с НДС; Голутвинский — План с НДС = 0):
-      //        поправка = фактический НДС (22% и 5%) − План с НДС × 5/105.
-      //      При Факте с НДС > Плана с НДС платежи 0% не учитываются (План с НДС закрыт платежами с НДС).
-      // Привязка PLS → транзакция: plan_money_id + дата (запасной ключ: проект + дата) — как для материалов.
-      var _smrParts = {p22: 0, p0: 0, exc: 0, excList: []};
+      // Разница в плановом НДС от СМР — фактические платежи СМР тек. месяца (кроме внебюджетных), НДС по факту (PLS 3144).
+      // Структура бюджета проекта — суммы по статьям СМР на Бюджетном лимите (36) за тек. месяц, независимо от категории платежа:
+      //   План5 = статьи СМР без «без НДС» (плановая ставка 5%);  План0 = статьи «СМР … без НДС» (0%).
+      // Факт по проекту: Ф_НДС = платежи с фактическим НДС (22% или 5%), Ф_0 = платежи без НДС.
+      //   Платежи с НДС закрывают План5, платежи без НДС — сначала План0, остаток — План5.
+      //   Плановый НДС = min(План5, Ф_НДС + max(0, Ф_0 − План0)) × 5/105.
+      //   Поправка = фактический НДС − плановый НДС.
+      // Привязка PLS → платёж: reference_id; если его нет — plan_money_id + дата (запасной ключ: проект + дата).
+      var _smrParts = {list: []};
       var _smrVatDiff = (function() {
         var _curYM = yr * 100 + mo;
         function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
         function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
         function _f(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); }
         function _prj(pid) { return PID_MAP[pid] || ('pid ' + pid); }
-        // Шаг 1: транзакции СМР тек. месяца по ключу
-        var _byKey = {}, _pidByKey = {};
+        // Шаг 1: платежи СМР тек. месяца (без внебюджетных)
+        var _G = {}, _byRef = {}, _byKey = {};
         txns.forEach(function(tx) {
           var dt = tx.date || '';
           if (dt.length < 10 || _ym(dt) !== _curYM) return;
           if (today && dt > today) return;
           var amt = parseFloat(tx.outcome) || 0;
           if (!amt) return;
-          if (!/^смр/i.test(catMap[tx.category_id] || '')) return;
-          var k = _key(tx.plan_money_id, tx.project_id, dt);
-          _byKey[k] = (_byKey[k] || 0) + amt;
-          _pidByKey[k] = +tx.project_id;
+          var cn = catMap[tx.category_id] || '';
+          if (!/^смр/i.test(cn)) return;
+          if (+tx.plan_money_id > 0 && _ebPmIds[tx.plan_money_id]) return;   // внебюджетные
+          var g = {pj: _prj(+tx.project_id), amt: amt, withVat: cn.toLowerCase().indexOf('без ндс') < 0, vat: 0};
+          var gid = (+tx.reference_id > 0) ? ('r' + tx.reference_id) : ('k' + _key(tx.plan_money_id, tx.project_id, dt));
+          if (_G[gid]) { _G[gid].amt += amt; } else { _G[gid] = g; }
+          if (+tx.reference_id > 0) _byRef[tx.reference_id] = gid;
+          else _byKey[_key(tx.plan_money_id, tx.project_id, dt)] = gid;
+          // для групп по ключу признак «с НДС» — если хотя бы один платёж группы в категории с НДС
+          if (g !== _G[gid] && g.withVat) _G[gid].withVat = true;
         });
-        // Шаг 2: фактический НДС по этим ключам (PLS 3144)
-        var _vatByKey = {};
+        // Шаг 2: фактический НДС (PLS 3144)
         (plsItems || []).forEach(function(p) {
           if (p.category_id !== 3144 || p.project_id === 27) return;
           var dt = p.date || '';
           if (dt.length < 10 || _ym(dt) !== _curYM) return;
           if (today && dt > today) return;
-          var k = _key(p.plan_money_id, p.project_id, dt);
-          if (!_byKey[k]) return;
-          _vatByKey[k] = (_vatByKey[k] || 0) + (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
+          var gid = (+p.reference_id > 0 && _byRef[p.reference_id]) || _byKey[_key(p.plan_money_id, p.project_id, dt)];
+          if (!gid) return;
+          _G[gid].vat += (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
         });
-        // Шаг 3: план СМР с НДС тек. месяца по проекту (36 + 150)
-        var _planVat = {};
+        // Шаг 3: План5 / План0 тек. месяца по проекту (только Бюджетный лимит)
+        var _plan = {}, _plan0 = {};
         (planItems || []).forEach(function(item) {
-          if (item.type !== 40) return;
-          if (item.org_account_id !== 36 && item.org_account_id !== 150) return;
+          if (item.type !== 40 || item.org_account_id !== 36) return;
           var dt = item.plan_paid_date || '';
           if (dt.length < 7 || _ym(dt) !== _curYM) return;
           var cn = catMap[item.category_id] || '';
-          if (!/^смр/i.test(cn) || cn.toLowerCase().indexOf('без ндс') >= 0) return;
-          var pj = _prj(+item.project_id);
-          _planVat[pj] = (_planVat[pj] || 0) + (parseFloat(item.total) || 0);
+          if (!/^смр/i.test(cn)) return;
+          var pj = _prj(+item.project_id), v = parseFloat(item.total) || 0;
+          if (cn.toLowerCase().indexOf('без ндс') >= 0) _plan0[pj] = (_plan0[pj] || 0) + v;
+          else                                           _plan[pj]  = (_plan[pj]  || 0) + v;
         });
-        // Шаг 4: по проекту — факт по ставкам
+        // Шаг 4: по проекту
         var _P = {};
-        Object.keys(_byKey).forEach(function(k) {
-          var a = _byKey[k], v = _vatByKey[k] || 0;
-          var pj = _prj(_pidByKey[k]);
-          var P = _P[pj] || (_P[pj] = {fAll: 0, fVat: 0, vat: 0, p22: 0, p0: 0});
-          P.fAll += a;
-          var is0  = Math.abs(v) < 1;
-          var is22 = Math.abs(v - a * 22 / 122) <= a * 22 / 122 * 0.01;
-          if (!is0) { P.fVat += a; P.vat += v; }
-          if (is22)     P.p22 += a * 22 / 122 - a * 5 / 105;
-          else if (is0) P.p0  -= a * 5 / 105;
+        Object.keys(_G).forEach(function(gid) {
+          var g = _G[gid];
+          var P = _P[g.pj] || (_P[g.pj] = {fVat: 0, f0: 0, vat: 0});
+          P.vat += g.vat;
+          if (Math.abs(g.vat) >= 1) P.fVat += g.amt; else P.f0 += g.amt;
         });
-        // Шаг 5: правило превышения плана с НДС
-        Object.keys(_P).forEach(function(pj) {
-          var P = _P[pj], plan = _planVat[pj] || 0;
-          if (P.fAll > plan) {
-            var d = P.vat - plan * 5 / 105;
-            _smrParts.exc += d;
-            _smrParts.excList.push(pj + ': факт ' + _f(P.fAll) + ' (с НДС ' + _f(P.fVat) + ') > план с НДС ' + _f(plan)
-              + ' → НДС ' + _f(Math.round(P.vat)) + ' − ' + _f(Math.round(plan * 5 / 105)) + ' = ' + _f(Math.round(d)));
-          } else {
-            _smrParts.p22 += P.p22;
-            _smrParts.p0  += P.p0;
-          }
+        var tot = 0;
+        Object.keys(_P).sort(function(x, y) { return x.localeCompare(y, 'ru'); }).forEach(function(pj) {
+          var P = _P[pj], p5 = _plan[pj] || 0, p0 = _plan0[pj] || 0;
+          var base = Math.min(p5, P.fVat + Math.max(0, P.f0 - p0));
+          var d = P.vat - base * 5 / 105;
+          tot += d;
+          if (Math.round(d) !== 0)
+            _smrParts.list.push(pj + ': НДС факт ' + _f(P.vat) + ' − min(план5 ' + _f(p5) + '; факт с НДС ' + _f(P.fVat)
+              + ' + max(0; факт без НДС ' + _f(P.f0) + ' − план0 ' + _f(p0) + ')) × 5/105 = ' + _f(d));
         });
-        _smrParts.p22 = Math.round(_smrParts.p22);
-        _smrParts.p0  = Math.round(_smrParts.p0);
-        _smrParts.exc = Math.round(_smrParts.exc);
-        return _smrParts.p22 + _smrParts.p0 + _smrParts.exc;
+        return Math.round(tot);
       })();
       // НДС от Проекта СМ (project_id=28) — весь НДС фактических транзакций тек. месяца (PLS), с обратным знаком:
       //   НДС от расходов (PLS 3144) — «+» (доход), НДС от доходов (PLS 3147) — «−».
