@@ -1474,7 +1474,8 @@
   // ═══════════════════════════════════════════════════════════════════════════
   // noEb = true — база на начало месяца: внебюджетные позиции (счёт 150) не участвуют ни в остатках, ни в плановом НДС
   //   (в ожидаемых доходах/расходах базы их тоже нет).
-  function buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan, noEb) {
+  // smrF — факт СМР тек. месяца (см. _smrF): остаток СМР с НДС считается без минусов по статьям бюджета.
+  function buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan, noEb, smrF) {
     if (!vf || !pm || !factResult) return '';
     var acc2     = factResult.acc;
     var SUBTYPES = ['mat','smr','smrZ','other'];
@@ -1643,6 +1644,7 @@
       var subRowsHtml = '';
       SUBTYPES.forEach(function(s) {
         var stOst   = projOstByType2(p, s);
+        if (s === 'smr' && smrF) stOst = smrF.rem5(p) + (noEb ? 0 : smrF.ebRem5(p));   // СМР с НДС: без минусов
         var stVatFa = fbt[s] || 0;
         var stVatPr;
         if (s === 'mat')       { stVatPr = Math.round(stOst * 22/122); }
@@ -1810,7 +1812,7 @@
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
   function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts, smVat) {
-    smVat = smVat || {exp: 0, inc: 0};
+    smVat = smVat || {exp: 0, inc: 0, off: 0};
     paidPmOuts = paidPmOuts || {};
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
@@ -1886,7 +1888,7 @@
     }).join('');
 
     // Итого с учётом разницы в НДС по материалам
-    var smDiff    = (smVat.exp || 0) - (smVat.inc || 0);   // НДС от Проекта СМ: доход (+)
+    var smDiff    = (smVat.exp || 0) - (smVat.inc || 0) + (smVat.off || 0);   // Разница в прочем НДС: доход (+)
     var grandAmt  = totAmt  + totVatDiff - smrDiff - smDiff;
     var grandNet  = totNet  + totVatDiff - smrDiff - smDiff;  // разницы идут в «Без НДС»
     var totSign   = grandAmt >= 0 ? '- ' : '+ ';
@@ -1928,14 +1930,15 @@
         + '</tr>';
     }
 
-    // НДС от Проекта СМ: + НДС от расходов − НДС от доходов (фактические транзакции тек. месяца)
+    // Разница в прочем НДС: Проект СМ (+ НДС расходов − НДС доходов) + НДС от офисных расходов
     if (smDiff !== 0) {
       var mSign  = smDiff > 0 ? '+ ' : '- ';
       var mColor = smDiff > 0 ? '#15803d' : '#dc2626';
       vatDiffRow += '<tr style="background:#fffbeb">'
         + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic"'
-        + ' title="НДС от расходов (PLS 3144): + ' + fmtFull(smVat.exp) + ' · НДС от доходов (PLS 3147): − ' + fmtFull(smVat.inc) + '"'
-        + '>НДС от Проекта СМ</td>'
+        + ' title="Проект СМ: НДС от расходов + ' + fmtFull(smVat.exp) + ' · НДС от доходов − ' + fmtFull(smVat.inc)
+        + '&#10;НДС от офисных расходов: + ' + fmtFull(smVat.off) + '"'
+        + '>Разница в прочем НДС</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + mColor + ';white-space:nowrap">'
         + mSign + fmtFull(Math.abs(smDiff)) + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + mColor + ';white-space:nowrap">'
@@ -2788,7 +2791,71 @@
       // ── END DEBUG ──
 
       // НДС факт/план — из нижней таблицы (остаток × ставка). Вычисляем заранее для карточки.
-      var _vat2 = buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan);
+      var SM_PID = 28;   // Проект СМ
+      var _ebPmIds = {};
+      (planItems || []).forEach(function(i) { if (i.org_account_id === 150 && i.id) _ebPmIds[i.id] = true; });
+      // ── СМР: факт тек. месяца по проектам (кроме внебюджетных) с разбивкой по фактическому НДС ──
+      // Используется и в прогнозе НДС (резерв), и в строке «Разница в плановом НДС от СМР» — единая методика.
+      var _smrF = (function() {
+        var _curYM = yr * 100 + mo;
+        function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
+        function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
+        function _prj(pid) { return PID_MAP[pid] || ('pid ' + pid); }
+        var G = {}, byRef = {}, byKey = {}, ebPaid5 = {};
+        txns.forEach(function(tx) {
+          var dt = tx.date || '';
+          if (dt.length < 10 || _ym(dt) !== _curYM) return;
+          if (today && dt > today) return;
+          var amt = parseFloat(tx.outcome) || 0;
+          if (!amt) return;
+          var cn = catMap[tx.category_id] || '';
+          if (!/^смр/i.test(cn)) return;
+          var pj = _prj(+tx.project_id);
+          if (+tx.plan_money_id > 0 && _ebPmIds[tx.plan_money_id]) {      // внебюджетные — отдельно
+            if (cn.toLowerCase().indexOf('без ндс') < 0) ebPaid5[pj] = (ebPaid5[pj] || 0) + amt;
+            return;
+          }
+          var gid = (+tx.reference_id > 0) ? ('r' + tx.reference_id) : ('k' + _key(tx.plan_money_id, tx.project_id, dt));
+          if (G[gid]) G[gid].amt += amt; else G[gid] = {pj: pj, amt: amt, vat: 0};
+          if (+tx.reference_id > 0) byRef[tx.reference_id] = gid; else byKey[_key(tx.plan_money_id, tx.project_id, dt)] = gid;
+        });
+        (plsItems || []).forEach(function(p) {
+          if (p.category_id !== 3144 || p.project_id === 27) return;
+          var dt = p.date || '';
+          if (dt.length < 10 || _ym(dt) !== _curYM) return;
+          if (today && dt > today) return;
+          var gid = (+p.reference_id > 0 && byRef[p.reference_id]) || byKey[_key(p.plan_money_id, p.project_id, dt)];
+          if (gid) G[gid].vat += (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
+        });
+        // План0 — статьи «СМР … без НДС» на Бюджетном лимите (36), тек. месяц и далее (как остаток бюджета в pm)
+        var p0 = {};
+        (planItems || []).forEach(function(item) {
+          if (item.type !== 40 || item.org_account_id !== 36) return;
+          var dt = item.plan_paid_date || '';
+          if (dt.length < 7 || _ym(dt) < _curYM) return;
+          var cn = (catMap[item.category_id] || '').toLowerCase();
+          if (!/^смр/.test(cn) || cn.indexOf('без ндс') < 0) return;
+          var pj = PID_MAP[item.project_id]; if (!pj) return;
+          p0[pj] = (p0[pj] || 0) + (parseFloat(item.total) || 0);
+        });
+        var P = {};
+        Object.keys(G).forEach(function(gid) {
+          var g = G[gid], x = P[g.pj] || (P[g.pj] = {fVat: 0, f0: 0, vat: 0});
+          x.vat += g.vat;
+          if (Math.abs(g.vat) >= 1) x.fVat += g.amt; else x.f0 += g.amt;
+        });
+        // Остаток бюджета СМР с НДС (без минусов): факт с НДС закрывает План5, факт без НДС — План0, превышение — другую статью.
+        function rem5(pj) {
+          var x = P[pj] || {fVat: 0, f0: 0}, p5 = (pm[pj] && pm[pj].bePlanByType && pm[pj].bePlanByType.smr) || 0, q0 = p0[pj] || 0;
+          return Math.max(0, p5 - x.fVat - Math.max(0, x.f0 - q0));
+        }
+        function ebRem5(pj) {
+          var e = (pm[pj] && pm[pj].beEbByType && pm[pj].beEbByType.smr) || 0;
+          return Math.max(0, e - (ebPaid5[pj] || 0));
+        }
+        return {P: P, p0: p0, rem5: rem5, ebRem5: ebRem5};
+      })();
+      var _vat2 = buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan, false, _smrF);
       var _vF   = _vat2.vatFact;
 
       // База: конец предыдущего месяца — всегда считается заново из API-данных,
@@ -2865,9 +2932,6 @@
       //                и транзакции Проекта СМ (project_id=28) — для него отдельная строка «НДС от Проекта СМ».
       // Привязка PLS → транзакция: plan_money_id + дата (reference_id PLS НЕ равен id транзакции).
       // Если у транзакции/PLS plan_money_id = 0 — запасной ключ: проект + дата.
-      var SM_PID = 28;   // Проект СМ
-      var _ebPmIds = {};
-      (planItems || []).forEach(function(i) { if (i.org_account_id === 150 && i.id) _ebPmIds[i.id] = true; });
       var _matVatDiff = (function() {
         var _curYM = yr * 100 + mo;
         function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
@@ -2901,85 +2965,32 @@
         });
         return Math.round(_calcVat - _factVat);
       })();
-      // Разница в плановом НДС от СМР — фактические платежи СМР тек. месяца (кроме внебюджетных), НДС по факту (PLS 3144).
-      // Структура бюджета проекта — суммы по статьям СМР на Бюджетном лимите (36) за тек. месяц, независимо от категории платежа:
-      //   План5 = статьи СМР без «без НДС» (плановая ставка 5%);  План0 = статьи «СМР … без НДС» (0%).
-      // Факт по проекту: Ф_НДС = платежи с фактическим НДС (22% или 5%), Ф_0 = платежи без НДС.
-      //   Платежи с НДС закрывают План5, платежи без НДС — сначала План0, остаток — План5.
-      //   Плановый НДС = min(План5, Ф_НДС + max(0, Ф_0 − План0)) × 5/105.
-      //   Поправка = фактический НДС − плановый НДС.
-      // Привязка PLS → платёж: reference_id; если его нет — plan_money_id + дата (запасной ключ: проект + дата).
+      // Разница в плановом НДС от СМР — та же методика, что в прогнозе НДС (резерв):
+      //   План5 = остаток бюджета по статьям СМР с НДС (Бюджетный лимит, тек. месяц и далее), План0 — по статьям «без НДС».
+      //   Факт тек. месяца (кроме внебюджетных) делится по фактическому НДС: Ф_НДС (22%/5%) и Ф_0 (без НДС).
+      //   Ф_НДС закрывает План5, Ф_0 — План0; превышение одной статьи уменьшает другую; остаток не ниже 0.
+      //   Поправка = фактический НДС − (План5 − остаток План5) × 5/105.
       var _smrParts = {list: []};
       var _smrVatDiff = (function() {
-        var _curYM = yr * 100 + mo;
-        function _ym(d) { return parseInt(d.slice(0,4)) * 100 + parseInt(d.slice(5,7)); }
-        function _key(pmId, pid, dt) { return (+pmId > 0) ? ('pm' + pmId + ':' + dt) : ('pr' + pid + ':' + dt); }
         function _f(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); }
-        function _prj(pid) { return PID_MAP[pid] || ('pid ' + pid); }
-        // Шаг 1: платежи СМР тек. месяца (без внебюджетных)
-        var _G = {}, _byRef = {}, _byKey = {};
-        txns.forEach(function(tx) {
-          var dt = tx.date || '';
-          if (dt.length < 10 || _ym(dt) !== _curYM) return;
-          if (today && dt > today) return;
-          var amt = parseFloat(tx.outcome) || 0;
-          if (!amt) return;
-          var cn = catMap[tx.category_id] || '';
-          if (!/^смр/i.test(cn)) return;
-          if (+tx.plan_money_id > 0 && _ebPmIds[tx.plan_money_id]) return;   // внебюджетные
-          var g = {pj: _prj(+tx.project_id), amt: amt, withVat: cn.toLowerCase().indexOf('без ндс') < 0, vat: 0};
-          var gid = (+tx.reference_id > 0) ? ('r' + tx.reference_id) : ('k' + _key(tx.plan_money_id, tx.project_id, dt));
-          if (_G[gid]) { _G[gid].amt += amt; } else { _G[gid] = g; }
-          if (+tx.reference_id > 0) _byRef[tx.reference_id] = gid;
-          else _byKey[_key(tx.plan_money_id, tx.project_id, dt)] = gid;
-          // для групп по ключу признак «с НДС» — если хотя бы один платёж группы в категории с НДС
-          if (g !== _G[gid] && g.withVat) _G[gid].withVat = true;
-        });
-        // Шаг 2: фактический НДС (PLS 3144)
-        (plsItems || []).forEach(function(p) {
-          if (p.category_id !== 3144 || p.project_id === 27) return;
-          var dt = p.date || '';
-          if (dt.length < 10 || _ym(dt) !== _curYM) return;
-          if (today && dt > today) return;
-          var gid = (+p.reference_id > 0 && _byRef[p.reference_id]) || _byKey[_key(p.plan_money_id, p.project_id, dt)];
-          if (!gid) return;
-          _G[gid].vat += (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);
-        });
-        // Шаг 3: План5 / План0 тек. месяца по проекту (только Бюджетный лимит)
-        var _plan = {}, _plan0 = {};
-        (planItems || []).forEach(function(item) {
-          if (item.type !== 40 || item.org_account_id !== 36) return;
-          var dt = item.plan_paid_date || '';
-          if (dt.length < 7 || _ym(dt) !== _curYM) return;
-          var cn = catMap[item.category_id] || '';
-          if (!/^смр/i.test(cn)) return;
-          var pj = _prj(+item.project_id), v = parseFloat(item.total) || 0;
-          if (cn.toLowerCase().indexOf('без ндс') >= 0) _plan0[pj] = (_plan0[pj] || 0) + v;
-          else                                           _plan[pj]  = (_plan[pj]  || 0) + v;
-        });
-        // Шаг 4: по проекту
-        var _P = {};
-        Object.keys(_G).forEach(function(gid) {
-          var g = _G[gid];
-          var P = _P[g.pj] || (_P[g.pj] = {fVat: 0, f0: 0, vat: 0});
-          P.vat += g.vat;
-          if (Math.abs(g.vat) >= 1) P.fVat += g.amt; else P.f0 += g.amt;
-        });
         var tot = 0;
-        Object.keys(_P).sort(function(x, y) { return x.localeCompare(y, 'ru'); }).forEach(function(pj) {
-          var P = _P[pj], p5 = _plan[pj] || 0, p0 = _plan0[pj] || 0;
-          var base = Math.min(p5, P.fVat + Math.max(0, P.f0 - p0));
-          var d = P.vat - base * 5 / 105;
+        Object.keys(_smrF.P).sort(function(x, y) { return x.localeCompare(y, 'ru'); }).forEach(function(pj) {
+          var x = _smrF.P[pj];
+          var p5 = (pm[pj] && pm[pj].bePlanByType && pm[pj].bePlanByType.smr) || 0, q0 = _smrF.p0[pj] || 0;
+          var used = p5 - _smrF.rem5(pj);
+          var d = x.vat - used * 5 / 105;
           tot += d;
           if (Math.round(d) !== 0)
-            _smrParts.list.push(pj + ': НДС факт ' + _f(P.vat) + ' − min(план5 ' + _f(p5) + '; факт с НДС ' + _f(P.fVat)
-              + ' + max(0; факт без НДС ' + _f(P.f0) + ' − план0 ' + _f(p0) + ')) × 5/105 = ' + _f(d));
+            _smrParts.list.push(pj + ': НДС факт ' + _f(x.vat) + ' − min(план5 ' + _f(p5) + '; факт с НДС ' + _f(x.fVat)
+              + ' + max(0; факт без НДС ' + _f(x.f0) + ' − план0 ' + _f(q0) + ')) × 5/105 = ' + _f(d));
         });
         return Math.round(tot);
       })();
-      // НДС от Проекта СМ (project_id=28) — весь НДС фактических транзакций тек. месяца (PLS), с обратным знаком:
-      //   НДС от расходов (PLS 3144) — «+» (доход), НДС от доходов (PLS 3147) — «−».
-      var _smVat = {exp: 0, inc: 0};
+      // Разница в прочем НДС:
+      //   1) Проект СМ (project_id=28) — весь НДС фактических транзакций тек. месяца (PLS): от расходов «+», от доходов «−»;
+      //   2) НДС от офисных расходов — фактический НДС тек. месяца по офису (как в прогнозе НДС; плановая ставка офиса 0%),
+      //      кроме внебюджетных позиций (их НДС уже в строках внебюджета).
+      var _smVat = {exp: 0, inc: 0, off: 0};
       (function() {
         var _curYM = yr * 100 + mo;
         (plsItems || []).forEach(function(p) {
@@ -2992,6 +3003,21 @@
           else                        _smVat.inc += (parseFloat(p.income) || 0) - (parseFloat(p.outcome) || 0);
         });
         _smVat.exp = Math.round(_smVat.exp); _smVat.inc = Math.round(_smVat.inc);
+        // Офис: факт НДС текущего месяца из прогноза НДС (vatOutOffBySub)
+        var off = 0;
+        ((vf && vf.data) || []).forEach(function(c) {
+          if (!c.isCurrent) return;
+          Object.keys(c.vatOutOffBySub || {}).forEach(function(k) { off += c.vatOutOffBySub[k] || 0; });
+        });
+        // минус НДС по внебюджетным офисным позициям (показан во внебюджете)
+        var ebMap = (vf && vf.ebPmVatMap) || {};
+        (planItems || []).forEach(function(i) {
+          if (i.org_account_id !== 150 || i.type !== 40 || !OXR_PIDS[i.project_id]) return;
+          var dt = i.plan_paid_date || '';
+          if (dt.length < 7 || (parseInt(dt.slice(0,4)) * 100 + parseInt(dt.slice(5,7))) < _curYM) return;
+          off -= ebMap[i.id] || 0;
+        });
+        _smVat.off = Math.round(off);
       })();
       var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {}, _smVat);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
