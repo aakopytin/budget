@@ -1637,12 +1637,7 @@
         if (s === 'mat')       { stVatPr = Math.round(stOst * 22/122); }
         else if (s === 'smr')  { stVatPr = Math.round(stOst * 5/105); }
         else if (s === 'smrZ') { stVatPr = 0; }
-        else {
-          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0);
-          var vatPlanOth = ((progVatOutByProjByType[p] || {})['other'] || 0);
-          var rateOth    = (planOth > 0 && vatPlanOth > 0) ? Math.min(vatPlanOth / planOth, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
-          stVatPr = Math.round(stOst * rateOth);
-        }
+        else { stVatPr = 0; }   // прочие проектные расходы: плановая ставка НДС 0%
         pVatPr += stVatPr;
         if (!stOst && !stVatPr && !stVatFa) return;
         subRowsHtml += '<tr>'
