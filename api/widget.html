@@ -428,10 +428,16 @@
     });
   }
 
+  // Справочные строки изменений бюджета: «Перенос± ММ.ГГГГ: …», «КБ± ММ.ГГГГ: …».
+  // Они фиксируют решение (перенос/корректировку), а сама сумма уже заложена в обычных бюджетных строках
+  // проектов — поэтому в расчёты бюджета, остатков, НДС и резерва не включаются (иначе двойной счёт).
+  var BUDGET_MEMO_RE = /^\s*(перенос|кб)\s*[+\-\u2212\u2013]?\s*\d{1,2}\.\d{4}/i;
+  function isBudgetMemo(i) { return BUDGET_MEMO_RE.test(i.name || ''); }
   function fetchPlanMoney(curYear) {
     return fetchAll('plan_money').then(function(items) {
       return items.filter(function(i) {
         if (!i.plan_paid_date) return false;
+        if (isBudgetMemo(i)) return false;   // справочные строки «Перенос»/«КБ» — вне расчёта
         var iy = parseInt(i.plan_paid_date.substring(0, 4));
         // Включаем curYear-1, чтобы plan_paid_date прошлого года (Анадырь, Рассказово и т.п.)
         // попали в pmDateMap и корректно исключились из текущего квартала (period-attribution).
