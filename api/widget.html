@@ -696,12 +696,12 @@
     });
     var epBrkPlan = {};
     EP_SUBCATS.forEach(function(s) {
-      epBrkPlan[s.code] = {be_plan:0, hE:0, plan_e:[0,0,0,0,0,0]};
+      epBrkPlan[s.code] = {be_plan:0, hE:0, be_eb:0, hE_eb:0, plan_e:[0,0,0,0,0,0]};
     });
     // Плановые поступления/выплаты займов → финансовая деятельность
     var finPlan = {
-      skIn:  {hI:0, plan:[0,0,0,0,0,0]},
-      skOut: {hE:0, plan:[0,0,0,0,0,0]}
+      skIn:  {hI:0, plan:[0,0,0,0,0,0], hEb:0, eb:0},   // hEb/eb — внебюджетный лимит (тек. месяц / тек.+будущие)
+      skOut: {hE:0, plan:[0,0,0,0,0,0], hEb:0, eb:0}
     };
 
     planItems.forEach(function(item) {
@@ -820,11 +820,23 @@
       var proj = PID_MAP[item.project_id];
       if (!proj || !pm[proj]) return;
       var catNameEb = (catMap && catMap[item.category_id]) || '';
-      if (SKIP[catNameEb]) return;  // категория в SKIP → транзакции тоже не войдут в eCur
       var iy  = parseInt(item.plan_paid_date.substring(0, 4));
       var im  = parseInt(item.plan_paid_date.substring(5, 7));
       var val = item.total || 0;
       var isI = (item.type === 30), isE = (item.type === 40);
+      // Займы/кредиты офиса и внепроектных на внебюджетном лимите → финансовая деятельность (как для счёта 36)
+      if ((OXR_PIDS[item.project_id] || item.project_id === 35) && LOAN_CATS[catNameEb]) {
+        if (iy > curYear || (iy === curYear && im >= curMonth)) {
+          if (isI) finPlan.skIn.eb  += val;
+          if (isE) finPlan.skOut.eb += val;
+        }
+        if (iy === curYear && im === curMonth) {
+          if (isI) finPlan.skIn.hEb  += val;
+          if (isE) finPlan.skOut.hEb += val;
+        }
+        return;
+      }
+      if (SKIP[catNameEb]) return;  // категория в SKIP → транзакции тоже не войдут в eCur
       var d = pm[proj];
       if (iy > curYear || (iy === curYear && im >= curMonth)) {
         if (isI) d.bi_eb += val;
@@ -838,6 +850,14 @@
       if (iy === curYear && im === curMonth) {
         if (isI) d.hI_eb += val;
         if (isE) d.hE_eb += val;
+      }
+      // Разбивка внебюджета по подкатегориям для внепроектных расходов (project 35)
+      if (item.project_id === 35 && isE) {
+        var obpEb35 = epBrkPlan[epSubcat(catNameEb)];
+        if (obpEb35) {
+          if (iy > curYear || (iy === curYear && im >= curMonth)) obpEb35.be_eb += val;
+          if (iy === curYear && im === curMonth) obpEb35.hE_eb += val;
+        }
       }
       // Разбивка внебюджета по подкатегориям для офисных проектов
       if (OXR_PIDS[item.project_id] && isE) {
@@ -2146,11 +2166,11 @@
       // Подкатегории расходов по EP_SUBCATS, отфильтровать нулевые (кроме po — всегда последние)
       var subs = EP_SUBCATS.filter(function(s) {
         return s.code !== 'po' && (epBrk[s.code].f25 || epBrk[s.code].f26 || epBrk[s.code].fCur
-          || (epBrkPlan && epBrkPlan[s.code].be_plan));
+          || (epBrkPlan && (epBrkPlan[s.code].be_plan || epBrkPlan[s.code].be_eb)));
       });
       subs.sort(function(x, y) { return (epBrk[y.code].f26||0) - (epBrk[x.code].f26||0); });
       var poSub = EP_SUBCATS.filter(function(s) { return s.code === 'po'; })[0];
-      if (epBrk.po.f25 || epBrk.po.f26 || epBrk.po.fCur || (epBrkPlan && epBrkPlan.po.be_plan))
+      if (epBrk.po.f25 || epBrk.po.f26 || epBrk.po.fCur || (epBrkPlan && (epBrkPlan.po.be_plan || epBrkPlan.po.be_eb)))
         subs.push(poSub);
 
       var subRows = subs.map(function(s) {
@@ -2158,7 +2178,8 @@
         var obp = epBrkPlan ? epBrkPlan[s.code] : null;
         var tot = brk.f25 + brk.f26;
         var b   = brk.f25 + (brk.f26 - brk.fCur) + (obp ? obp.be_plan : 0);
-        var ost = (b === 0 || !obp || !obp.be_plan) ? 0 : b - tot;
+        var obEb = obp ? (obp.be_eb || 0) : 0;   // внебюджетный лимит — в остатке (как у офиса)
+        var ost = (b + obEb === 0 || !obp || (!obp.be_plan && !obEb)) ? 0 : b + obEb - tot;
         var hE  = obp ? obp.hE : 0;
         return '<tr>'
           + TDl('<span style="padding-left:14px">' + s.label + '</span>')
@@ -2166,7 +2187,7 @@
           + TD(fmtK(brk.f25), SEP) + TD(fmtK(brk.f26))
           + TD(fmtK(tot, true))
           + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
-          + TD(fmtK(0), SEP) + TD(fmtK(hE)) + TD(fmtK(brk.fCur))
+          + TD(fmtK(obp ? (obp.hE_eb || 0) : 0), SEP) + TD(fmtK(hE)) + TD(fmtK(brk.fCur))
           + (obp ? obp.plan_e : [0,0,0,0,0,0]).map(function(v, i) {
               return TD(fmtK(v), i === 0 ? SEP : '');
             }).join('')
@@ -2195,23 +2216,24 @@
     }
 
     // Строка займов: факт + план (hPlan — тек.мес.бюджет, planArr — 6 план.месяцев)
-    function finLoanRow(label, item, hPlan, planArr) {
+    // hEb — внебюджетный лимит тек. месяца (колонка «Внебюдж.»), eb — внебюджет тек.+будущих месяцев (в остатке)
+    function finLoanRow(label, item, hPlan, planArr, hEb, eb) {
       var f25 = item.f25, f26 = item.f26, tot = f25 + f26, fCur = item.fCur;
-      hPlan = hPlan || 0;
+      hPlan = hPlan || 0; hEb = hEb || 0; eb = eb || 0;
       planArr = planArr || [0,0,0,0,0,0];
-      var hasPlan = hPlan > 0 || planArr.some(function(v) { return v > 0; });
+      var hasPlan = hPlan > 0 || eb > 0 || planArr.some(function(v) { return v > 0; });
       if (!tot && !fCur && !hasPlan) return '';
-      // Бюджет и Остаток — та же логика, что у остальных строк
+      // Бюджет и Остаток — та же логика, что у остальных строк (внебюджет — только в остатке, как у офиса)
       var planSum = planArr.reduce(function(s, v) { return s + v; }, 0);
       var b   = f25 + (f26 - fCur) + hPlan + planSum;
-      var ost = (b === 0 || (!hPlan && !planSum)) ? 0 : b - tot;
+      var ost = (b + eb === 0 || (!hPlan && !planSum && !eb)) ? 0 : b + eb - tot;
       return '<tr>'
         + TDl(label, ';padding-left:14px')
         + TD(fmtK(b), ';color:#9ca3af')
         + TD(fmtK(f25), SEP) + TD(fmtK(f26))
         + TD(fmtK(tot, true))
         + TD(fmtK(ost, false, true), ost < 0 ? ';color:#dc2626' : '')
-        + TD(dash(), SEP) + TD(fmtK(hPlan)) + TD(fmtK(fCur))
+        + TD(eb ? fmtK(hEb) : dash(), SEP) + TD(fmtK(hPlan)) + TD(fmtK(fCur))
         + planArr.map(function(v, i) { return TD(fmtK(v), i === 0 ? SEP : ''); }).join('')
         + '</tr>';
     }
@@ -2228,10 +2250,11 @@
     // Бюджет и остаток — только по finLoanRow-строкам (у finRow нет плана → ост = 0)
     var skInPlanSum   = fp.skIn.plan.reduce(function(s,v){ return s+v; }, 0);
     var skInB         = fin.skIn.f25  + (fin.skIn.f26  - fin.skIn.fCur)  + fp.skIn.hI  + skInPlanSum;
-    var skInOst       = (skInB === 0  || (!fp.skIn.hI  && !skInPlanSum))  ? 0 : skInB  - (fin.skIn.f25  + fin.skIn.f26);
+    var skInEb        = fp.skIn.eb || 0, skOutEb = fp.skOut.eb || 0;   // внебюджетные займы — в остатке
+    var skInOst       = (skInB + skInEb === 0  || (!fp.skIn.hI  && !skInPlanSum && !skInEb))  ? 0 : skInB + skInEb - (fin.skIn.f25  + fin.skIn.f26);
     var skOutPlanSum  = fp.skOut.plan.reduce(function(s,v){ return s+v; }, 0);
     var skOutB        = fin.skOut.f25 + (fin.skOut.f26 - fin.skOut.fCur) + fp.skOut.hE + skOutPlanSum;
-    var skOutOst      = (skOutB === 0 || (!fp.skOut.hE && !skOutPlanSum)) ? 0 : skOutB - (fin.skOut.f25 + fin.skOut.f26);
+    var skOutOst      = (skOutB + skOutEb === 0 || (!fp.skOut.hE && !skOutPlanSum && !skOutEb)) ? 0 : skOutB + skOutEb - (fin.skOut.f25 + fin.skOut.f26);
     var finNetB       = skInB - skOutB;
     var finNetOst     = skInOst - skOutOst;
 
@@ -2590,8 +2613,8 @@
 
       // ФИНАНСОВАЯ ДЕЯТЕЛЬНОСТЬ
       + sectionHdr('ПОЛУЧЕНИЕ/ВЫДАЧА ЗАЙМОВ', '#f0f4ff', '#3730a3', '#c7d2fe')
-      + finLoanRow('Выдача/Выплата займов',    fin.skOut, finPlan ? finPlan.skOut.hE   : 0, finPlan ? finPlan.skOut.plan : null)
-      + finLoanRow('Получение/Возврат займов', fin.skIn,  finPlan ? finPlan.skIn.hI    : 0, finPlan ? finPlan.skIn.plan  : null)
+      + finLoanRow('Выдача/Выплата займов',    fin.skOut, finPlan ? finPlan.skOut.hE   : 0, finPlan ? finPlan.skOut.plan : null, finPlan ? finPlan.skOut.hEb : 0, finPlan ? finPlan.skOut.eb : 0)
+      + finLoanRow('Получение/Возврат займов', fin.skIn,  finPlan ? finPlan.skIn.hI    : 0, finPlan ? finPlan.skIn.plan  : null, finPlan ? finPlan.skIn.hEb  : 0, finPlan ? finPlan.skIn.eb  : 0)
       + finRow('Процентные расходы', fin.int)
       + finRow('Переводы между счетами', trNet)
       + '<tr style="background:#e0e7ff">'
@@ -2746,10 +2769,11 @@
       var _fp = finPlan || {skIn:{hI:0,plan:[0,0,0,0,0,0]},skOut:{hE:0,plan:[0,0,0,0,0,0]}};
       var _skInPS  = _fp.skIn.plan.reduce(function(s,v){return s+v;},0);
       var _skInB   = _fin.skIn.f25  + (_fin.skIn.f26  - _fin.skIn.fCur)  + _fp.skIn.hI  + _skInPS;
-      var _skInO   = (_skInB  === 0 || (!_fp.skIn.hI  && !_skInPS))  ? 0 : _skInB  - (_fin.skIn.f25  + _fin.skIn.f26);
+      var _skInEb  = _fp.skIn.eb || 0, _skOutEb = _fp.skOut.eb || 0;   // внебюджетные займы (в базе на начало месяца не учитываются)
+      var _skInO   = (_skInB + _skInEb === 0 || (!_fp.skIn.hI  && !_skInPS && !_skInEb))  ? 0 : _skInB + _skInEb - (_fin.skIn.f25  + _fin.skIn.f26);
       var _skOutPS = _fp.skOut.plan.reduce(function(s,v){return s+v;},0);
       var _skOutB  = _fin.skOut.f25 + (_fin.skOut.f26 - _fin.skOut.fCur) + _fp.skOut.hE + _skOutPS;
-      var _skOutO  = (_skOutB === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutB - (_fin.skOut.f25 + _fin.skOut.f26);
+      var _skOutO  = (_skOutB + _skOutEb === 0 || (!_fp.skOut.hE && !_skOutPS && !_skOutEb)) ? 0 : _skOutB + _skOutEb - (_fin.skOut.f25 + _fin.skOut.f26);
       var _finNetOst = _skInO - _skOutO;
 
       // Изменение резерва: превышение факта тек.месяца над планом тек.месяца
