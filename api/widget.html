@@ -394,28 +394,35 @@
   }
 
   // API через серверный прокси /api/data
+  // Загрузка сущности «пачками»: сервер /api/data?chunk=N сам собирает до 15 страниц Аспро (1500 записей)
+  // за один запрос — около 10 запросов на загрузку вместо ~100. При ошибке сервера (502/504) пачка
+  // запрашивается повторно (до 2 повторов). Ответы кешируются CDN Vercel на 2 минуты.
   function fetchAll(entity, extra) {
-    var all = [], page = 1;
-    function next() {
+    var all = [], chunk = 0;
+    function getChunk(attempt) {
       var p = new URLSearchParams();
       p.append('entity', entity);
-      p.append('limit', '100');
-      p.append('page', String(page));
+      p.append('chunk', String(chunk));
       if (extra) Object.keys(extra).forEach(function(k) { p.append(k, extra[k]); });
       return fetch('/api/data?' + p.toString())
         .then(function(r) {
+          if (r.status >= 500 && attempt < 2) {
+            return new Promise(function(res) { setTimeout(res, 1500); }).then(function() { return getChunk(attempt + 1); });
+          }
           if (!r.ok) throw new Error(entity + ' HTTP ' + r.status);
           return r.json();
-        })
-        .then(function(d) {
-          if (d.error) throw new Error(entity + ': ' + JSON.stringify(d.error));
-          var items = (d.response && d.response.items) || [];
-          all = all.concat(items);
-          var total = (d.response && d.response.total) || 0;
-          if (all.length >= total || items.length < 100) return all;
-          page++;
-          return next();
         });
+    }
+    function next() {
+      return getChunk(0).then(function(d) {
+        if (d.error) throw new Error(entity + ': ' + JSON.stringify(d.error));
+        var items = (d.response && d.response.items) || [];
+        all = all.concat(items);
+        var total = (d.response && d.response.total) || 0;
+        if (all.length >= total || items.length === 0) return all;
+        chunk++;
+        return next();
+      });
     }
     return next();
   }
@@ -490,8 +497,11 @@
     _pls3144err = null;
     var prevYear = curYear - 1;
     // req1 может вернуть 400 "entity not allowed" — подавляем ошибку
-    var req1 = fetchAll('transaction_pls').catch(function() { return []; });
-    var req2 = fetchPls3144(curYear).catch(function(e) {
+    // Один и тот же список transaction_pls (эндпоинт /api/pls3144 отдавал его же целиком, без фильтра) —
+    // загружается один раз и используется для обеих веток.
+    var plsAll = fetchAll('transaction_pls');
+    var req1 = plsAll.catch(function() { return []; });
+    var req2 = plsAll.catch(function(e) {
       _pls3144err = (e && e.message) ? e.message.slice(0, 80) : 'ошибка req2';
       console.warn('[fetchPls] req2 failed:', _pls3144err);
       return [];
