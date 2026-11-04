@@ -16,7 +16,7 @@ const ENTITY_PATH = { crm_account: 'crm/account' };
 const ALLOWED = ['plan_money', 'transaction', 'categories', 'transaction_pls', 'bank_account'];
 const PAGE_SIZE = 100;
 const CHUNK_PAGES = 15;      // страниц Aspro в одной «пачке» (ответ ≤ ~2 МБ, лимит Vercel 4,5 МБ)
-const PARALLEL = 5;          // одновременных запросов к Aspro внутри пачки
+const PARALLEL = 3;          // одновременных запросов к Aspro внутри пачки (при 5 Аспро отдавал пустые страницы)
 
 function readJsonBody(req) {
   return new Promise(function(resolve) {
@@ -37,8 +37,14 @@ function httpsGetOnce(url, timeoutMs) {
       let data = '';
       resp.on('data', function(chunk) { data += chunk; });
       resp.on('end', function() {
-        try { resolve(JSON.parse(data)); }
-        catch(e) { reject(new Error('JSON parse (HTTP ' + resp.statusCode + '): ' + e.message)); }
+        var j;
+        try { j = JSON.parse(data); }
+        catch(e) { return reject(new Error('JSON parse (HTTP ' + resp.statusCode + '): ' + e.message)); }
+        // Ответ без блока response (ограничение частоты запросов, ошибка Аспро) — сбой, а не пустой список
+        if (resp.statusCode >= 400 || !j || !j.response) {
+          return reject(new Error('Aspro HTTP ' + resp.statusCode + ': ' + JSON.stringify(j).slice(0, 200)));
+        }
+        resolve(j);
       });
     });
     req.setTimeout(timeoutMs, function() { req.destroy(new Error('timeout ' + timeoutMs + ' ms')); });
@@ -56,6 +62,21 @@ async function httpsGet(url) {
     catch (e) { lastErr = e; }
   }
   throw lastErr;
+}
+
+// Страница пачки с проверкой полноты: каждая страница, кроме последней, обязана содержать PAGE_SIZE записей,
+// последняя — хотя бы одну. Неполная страница запрашивается повторно; если и после повторов неполная —
+// ошибка 502 (без кеширования), чтобы виджет не показал и не закешировал усечённые данные.
+async function fetchFullPage(url, isLast) {
+  let got = 0;
+  for (let i = 0; i < RETRY_DELAYS.length; i++) {
+    if (RETRY_DELAYS[i]) await new Promise(function(r) { setTimeout(r, RETRY_DELAYS[i]); });
+    const d = await httpsGet(url);
+    const items = itemsOf(d);
+    got = items.length;
+    if (isLast ? got > 0 : got >= PAGE_SIZE) return { d: d, items: items };
+  }
+  throw new Error('incomplete_page: ' + got + ' records (' + url.replace(/api_key=[^&]*/, 'api_key=***') + ')');
 }
 
 function itemsOf(data) {
@@ -103,16 +124,23 @@ module.exports = async function handler(req, res) {
         const chunk = Math.max(0, parseInt(q.chunk, 10) || 0);
         const first = chunk * CHUNK_PAGES + 1;
         const d0 = await httpsGet(pageUrl(first, PAGE_SIZE));
-        if (!d0 || !d0.response) throw new Error('unexpected_aspro_response');
         const total = d0.response.total || 0;
         const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        if (first > totalPages || total === 0) {
+          res.setHeader('Cache-Control', total === 0 ? 'no-store' : cacheHdr);  // пустой ответ не кешируем
+          return res.end(JSON.stringify({ response: { items: [], total: total, pages: totalPages } }));
+        }
         const last = Math.min(totalPages, first + CHUNK_PAGES - 1);
-        const items = itemsOf(d0).slice();
+        let items = itemsOf(d0);
+        if (first === totalPages ? items.length === 0 : items.length < PAGE_SIZE) {
+          items = (await fetchFullPage(pageUrl(first, PAGE_SIZE), first === totalPages)).items;
+        }
+        items = items.slice();
         const rest = [];
         for (let p = first + 1; p <= last; p++) rest.push(p);
         for (let i = 0; i < rest.length; i += PARALLEL) {
-          const part = await Promise.all(rest.slice(i, i + PARALLEL).map(function(p) { return httpsGet(pageUrl(p, PAGE_SIZE)); }));
-          part.forEach(function(d) { items.push.apply(items, itemsOf(d)); });
+          const part = await Promise.all(rest.slice(i, i + PARALLEL).map(function(p) { return fetchFullPage(pageUrl(p, PAGE_SIZE), p === totalPages); }));
+          part.forEach(function(r) { items.push.apply(items, r.items); });
         }
         res.setHeader('Cache-Control', cacheHdr);
         return res.end(JSON.stringify({ response: { items: items, total: total, pages: totalPages } }));
