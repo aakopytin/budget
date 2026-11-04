@@ -64,19 +64,48 @@ async function httpsGet(url) {
   throw lastErr;
 }
 
-// Страница пачки с проверкой полноты: каждая страница, кроме последней, обязана содержать PAGE_SIZE записей,
-// последняя — хотя бы одну. Неполная страница запрашивается повторно; если и после повторов неполная —
-// ошибка 502 (без кеширования), чтобы виджет не показал и не закешировал усечённые данные.
-async function fetchFullPage(url, isLast) {
-  let got = 0;
-  for (let i = 0; i < RETRY_DELAYS.length; i++) {
-    if (RETRY_DELAYS[i]) await new Promise(function(r) { setTimeout(r, RETRY_DELAYS[i]); });
-    const d = await httpsGet(url);
-    const items = itemsOf(d);
-    got = items.length;
-    if (isLast ? got > 0 : got >= PAGE_SIZE) return { d: d, items: items };
+// Загрузка пачки страниц first..last с проверкой полноты.
+// Короткая страница (меньше 100 записей; последняя по total — меньше остатка) запрашивается повторно
+// (до 3 раз, если за ней есть данные; до 2 раз в «хвосте»), берётся максимум.
+// Если она так и осталась короткой:
+//   • за ней в пачке или на следующей странице есть данные → «дыра» (Аспро отдал неполную страницу) → ошибка 502;
+//   • дальше данных нет → короткий «хвост» законный (у Аспро total бывает больше реального числа записей,
+//     например categories: total 104, отдаёт 90) — принимаем.
+async function fetchChunkPages(pageUrl, first, last, totalPages, d0) {
+  const pages = [];
+  for (let p = first; p <= last; p++) pages.push(p);
+  const res = {};
+  res[first] = itemsOf(d0);
+  const rest = pages.slice(1);
+  for (let i = 0; i < rest.length; i += PARALLEL) {
+    const part = await Promise.all(rest.slice(i, i + PARALLEL).map(function(p) { return httpsGet(pageUrl(p)); }));
+    part.forEach(function(d, k) { res[rest[i + k]] = itemsOf(d); });
   }
-  throw new Error('incomplete_page: ' + got + ' records (' + url.replace(/api_key=[^&]*/, 'api_key=***') + ')');
+  // Ожидаемое число записей: полная страница, на последней (по total) — остаток
+  const total = (d0.response && d0.response.total) || 0;
+  const expected = function(p) { return p < totalPages ? PAGE_SIZE : total - (totalPages - 1) * PAGE_SIZE; };
+  const isShort = function(p) { return res[p].length < expected(p); };
+  for (const p of pages) {
+    // короткая страница, за которой в пачке есть данные, — почти наверняка сбой: до 3 повторов; короткий хвост — 2 повтора
+    const tries = pages.some(function(q) { return q > p && res[q].length > 0; }) ? 3 : 2;
+    for (let a = 1; a <= tries && isShort(p); a++) {
+      await new Promise(function(r) { setTimeout(r, 700 * a); });
+      const again = itemsOf(await httpsGet(pageUrl(p)));
+      if (again.length > res[p].length) res[p] = again;
+    }
+  }
+  let ended = false;
+  for (const p of pages) {
+    if (!isShort(p)) continue;
+    let gap = pages.some(function(q) { return q > p && res[q].length > 0; });
+    if (!gap && p === last && last < totalPages) gap = itemsOf(await httpsGet(pageUrl(last + 1))).length > 0;
+    if (gap) throw new Error('incomplete_page ' + p + ': ' + res[p].length + ' records');
+    ended = true;  // законный короткий хвост: записей больше нет
+  }
+  if (last === totalPages) ended = true;  // в пачке последняя страница — точное число записей известно
+  let items = [];
+  pages.forEach(function(p) { items = items.concat(res[p]); });
+  return { items: items, ended: ended };
 }
 
 function itemsOf(data) {
@@ -131,19 +160,11 @@ module.exports = async function handler(req, res) {
           return res.end(JSON.stringify({ response: { items: [], total: total, pages: totalPages } }));
         }
         const last = Math.min(totalPages, first + CHUNK_PAGES - 1);
-        let items = itemsOf(d0);
-        if (first === totalPages ? items.length === 0 : items.length < PAGE_SIZE) {
-          items = (await fetchFullPage(pageUrl(first, PAGE_SIZE), first === totalPages)).items;
-        }
-        items = items.slice();
-        const rest = [];
-        for (let p = first + 1; p <= last; p++) rest.push(p);
-        for (let i = 0; i < rest.length; i += PARALLEL) {
-          const part = await Promise.all(rest.slice(i, i + PARALLEL).map(function(p) { return fetchFullPage(pageUrl(p, PAGE_SIZE), p === totalPages); }));
-          part.forEach(function(r) { items.push.apply(items, r.items); });
-        }
+        const r = await fetchChunkPages(function(p) { return pageUrl(p, PAGE_SIZE); }, first, last, totalPages, d0);
+        // Данные кончились раньше total (total Аспро завышен) — отдаём фактическое число записей, чтобы виджет не ждал остальные
+        const realTotal = r.ended ? (first - 1) * PAGE_SIZE + r.items.length : total;
         res.setHeader('Cache-Control', cacheHdr);
-        return res.end(JSON.stringify({ response: { items: items, total: total, pages: totalPages } }));
+        return res.end(JSON.stringify({ response: { items: r.items, total: realTotal, pages: totalPages } }));
       }
 
       // Режим одной страницы (как раньше)
