@@ -445,6 +445,15 @@
     if (!m) return 0;
     return (m[2] && m[2] !== '+') ? -1 : 1;
   }
+  // Плановый платёж займа/кредита → его категория. Транзакция, привязанная к такому плановому платежу,
+  // учитывается по категории планового платежа (погашение основного долга), даже если в самой транзакции
+  // стоит другая категория (например, «Проценты к уплате»).
+  var _pmLoanCat = {};
+  function txCatName(tx, catMap) {
+    var n = catMap[tx.category_id] || '';
+    var pc = tx.plan_money_id && _pmLoanCat[tx.plan_money_id];
+    return (pc && !LOAN_CATS[n]) ? (catMap[pc] || n) : n;
+  }
   function fetchPlanMoney(curYear) {
     return fetchAll('plan_money').then(function(items) {
       return items.filter(function(i) {
@@ -606,7 +615,7 @@
       var mo = parseInt(dt.slice(5, 7)) || 0;
       if (yr !== curYear && yr !== curYear - 1) return;
 
-      var typeName = catMap[tx.category_id] || '';
+      var typeName = txCatName(tx, catMap);
 
       var isPrev = (yr === curYear - 1);
       var isCur  = (yr === curYear && mo === curMonth);
@@ -1076,7 +1085,7 @@
       var tYM = parseInt(dt.slice(0, 4)) * 100 + parseInt(dt.slice(5, 7));
       var aid = tx.org_account_id;
       if (!VSIP_ACC_IDS[aid] && !TT_ACC_IDS[aid]) return;
-      var catName  = catMap[tx.category_id] || '';
+      var catName  = txCatName(tx, catMap);
       var projName = PID_MAP[tx.project_id] || '';
       if (catName === 'Перевод между счетами (поступление)' ||
           catName === 'Перевод между счетами (списание)') return;
@@ -2756,6 +2765,16 @@
       var bankAccounts = results[2];
       var catMap       = _catMap;
       var planItems    = _planItems;
+      _pmLoanCat = {};
+      planItems.forEach(function(i) { if (LOAN_CATS[catMap[i.category_id] || '']) _pmLoanCat[i.id] = i.category_id; });
+      // Внебюджетный лимит (счёт 150): учитываются только плановые платежи по месяц отчёта включительно;
+      // внебюджетные платежи следующих месяцев в отчёт не входят (прошлые месяцы отсекаются в расчётах ниже).
+      var _curYMeb = yr * 100 + mo;
+      planItems = planItems.filter(function(i) {
+        if (i.org_account_id !== 150) return true;
+        var d = i.plan_paid_date || '';
+        return (parseInt(d.slice(0, 4)) * 100 + parseInt(d.slice(5, 7))) <= _curYMeb;
+      });
       rebuildProjMap(txns, planItems, yr);  // динамическая группировка проектов
       var factResult  = calcFact(txns, catMap, yr, mo, today, bankAccounts);
       var planResult  = calcPlan(planItems, yr, mo, nextMonths, catMap);
