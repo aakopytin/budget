@@ -1142,7 +1142,7 @@
       var pn = PID_MAP[p.project_id] || 'Прочие проекты ИКП';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (data[ci].isCurrent && today && p.date > today) break;  // as-of: уже введено
+          if (today && p.date > today) break;  // as-of: запись введена не позже даты отчёта (в любом месяце — НДС из оплат после даты отчёта, отнесённый по дате плана в прошлый месяц, не должен попадать в базу)
           var amt4a = (parseFloat(p.income) || 0) - (parseFloat(p.outcome) || 0);  // нетто, как в ДДС
           if (!amt4a) break;
           data[ci].vatInFact += amt4a;
@@ -1164,7 +1164,7 @@
       var pn = PID_MAP[p.project_id] || 'Прочие проекты ИКП';
       for (var ci = 0; ci < 9; ci++) {
         if (cols[ci].ym === pYM && (data[ci].isPast || data[ci].isCurrent)) {
-          if (data[ci].isCurrent && today && p.date > today) break;  // as-of: уже введено
+          if (today && p.date > today) break;  // as-of: запись введена не позже даты отчёта (в любом месяце — НДС из оплат после даты отчёта, отнесённый по дате плана в прошлый месяц, не должен попадать в базу)
           var amt4b = (parseFloat(p.outcome) || 0) - (parseFloat(p.income) || 0);  // нетто, как в ДДС
           if (!amt4b) break;
           // Исключаем НДС-платежи в бюджет: совпадение (дата, сумма) с tax-транзакцией
@@ -1686,6 +1686,14 @@
       SUBTYPES.forEach(function(s) {
         var stOst   = projOstByType2(p, s);
         if (s === 'smr' && smrF) stOst = smrF.rem5(p) + (noEb ? 0 : smrF.ebRem5(p));   // СМР с НДС: без минусов
+        // СМР без НДС = общий остаток СМР (с НДС + без НДС) − показанный остаток «СМР с НДС».
+        // Так факт «СМР с НДС» сверх его бюджета уменьшает остаток «СМР без НДС» (платёж с НДС по статье,
+        // забюджетированной без НДС), а перерасход «СМР без НДС», уже вычтенный в rem5, не вычитается дважды.
+        // Сумма подстрок равна остатку проекта. НДС не меняется: он считается по строке «СМР с НДС».
+        if (s === 'smrZ') {
+          var _smrShown = smrF ? (smrF.rem5(p) + (noEb ? 0 : smrF.ebRem5(p))) : projOstByType2(p, 'smr');
+          stOst = projOstByType2(p, 'smr') + projOstByType2(p, 'smrZ') - _smrShown;
+        }
         var stVatFa = fbt[s] || 0;
         var stVatPr;
         if (s === 'mat')       { stVatPr = Math.round(stOst * 22/122); }
