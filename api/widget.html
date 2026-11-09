@@ -1808,7 +1808,24 @@
     }
     // Внепроектные расходы
     var epOst2    = groupOst2('Внепроектные расходы');
-    var epVatPr2  = groupVatProg2('Внепроектные расходы', epOst2);
+    // НДС прогноз по статьям — как в проектах (не средняя ставка по группе):
+    // материалы 22/122, СМР с НДС 5/105 (rem5), без НДС 0, прочие — только возвраты покупателям по их ставке.
+    var epVatPr2  = (function(p) {
+      var v = 0;
+      SUBTYPES.forEach(function(s) {
+        if (s === 'mat') v += Math.round(projOstByType2(p, 'mat') * 22/122);
+        else if (s === 'smr') {
+          var o5 = smrF ? (smrF.rem5(p) + (noEb ? 0 : smrF.ebRem5(p))) : projOstByType2(p, 'smr');
+          v += Math.round(o5 * 5/105);
+        } else if (s === 'other') {
+          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0);
+          var vatPlanOth = ((progVatOutByProjByType[p] || {})['other'] || 0);
+          var rateOth    = (planOth > 0 && vatPlanOth > 0) ? Math.min(vatPlanOth / planOth, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
+          v += Math.round(projRetOst2(p) * rateOth);
+        }
+      });
+      return v;
+    })('Внепроектные расходы');
     var epVatFa2  = groupVatFact2('Внепроектные расходы');
     if (epOst2 || epVatPr2 || epVatFa2) {
       expRows += '<tr>'
@@ -1869,8 +1886,10 @@
   }
 
   // Раскрывающийся список транзакций по счёту Внебюджетный лимит
-  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts, smVat) {
+  function buildEbDetails(planItems, catMap, curYear, curMonth, effRates, ebPmVatMap, paidPmIds, paidPmAmts, matVatDiff, smrVatDiff, smrParts, paidPmOuts, smVat, trVat) {
     smVat = smVat || {exp: 0, inc: 0, off: 0};
+    trVat = trVat || {sum: 0, list: []};
+    var trDiff = Math.round(trVat.sum || 0);   // НДС от переносов бюджета: доход (+)
     paidPmOuts = paidPmOuts || {};
     effRates = effRates || {};
     ebPmVatMap = ebPmVatMap || {};
@@ -1882,7 +1901,7 @@
       var im = parseInt((item.plan_paid_date || '').substring(5, 7));
       return (iy > curYear) || (iy === curYear && im >= curMonth);
     });
-    if (!items.length) return '';
+    if (!items.length && !trDiff) return '';
 
     items.sort(function(a, b) {
       return (b.plan_paid_date || '').localeCompare(a.plan_paid_date || '');
@@ -1947,8 +1966,8 @@
 
     // Итого с учётом разницы в НДС по материалам
     var smDiff    = (smVat.exp || 0) - (smVat.inc || 0) + (smVat.off || 0);   // Разница в прочем НДС: доход (+)
-    var grandAmt  = totAmt  + totVatDiff - smrDiff - smDiff;
-    var grandNet  = totNet  + totVatDiff - smrDiff - smDiff;  // разницы идут в «Без НДС»
+    var grandAmt  = totAmt  + totVatDiff - smrDiff - smDiff - trDiff;
+    var grandNet  = totNet  + totVatDiff - smrDiff - smDiff - trDiff;  // разницы идут в «Без НДС»
     var totSign   = grandAmt >= 0 ? '- ' : '+ ';
     var totColor  = grandAmt >= 0 ? '#dc2626' : '#15803d';
     var totalRow  = '<tr style="background:#f3f4f6;font-weight:600">'
@@ -2001,6 +2020,22 @@
         + mSign + fmtFull(Math.abs(smDiff)) + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + mColor + ';white-space:nowrap">'
         + mSign + fmtFull(Math.abs(smDiff)) + '</td>'
+        + '<td></td>'
+        + '</tr>';
+    }
+    // НДС от переносов бюджета (Перенос± с месяцем решения = месяц отчёта): Σ сумма переноса × плановая ставка статьи
+    // (материалы 22/122, СМР с НДС 5/105, без НДС 0). Доход (+): рост планового НДС к вычету увеличивает резерв.
+    if (trDiff !== 0) {
+      var tSign  = trDiff > 0 ? '+ ' : '- ';
+      var tColor = trDiff > 0 ? '#15803d' : '#dc2626';
+      vatDiffRow += '<tr style="background:#fffbeb">'
+        + '<td colspan="3" style="padding:2px 8px;font-size:10px;color:#92400e;text-align:right;font-style:italic"'
+        + (trVat.list && trVat.list.length ? ' title="' + trVat.list.join('&#10;').replace(/"/g, '&quot;') + '"' : '')
+        + '>НДС от переносов бюджета</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + tColor + ';white-space:nowrap">'
+        + tSign + fmtFull(Math.abs(trDiff)) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;color:' + tColor + ';white-space:nowrap">'
+        + tSign + fmtFull(Math.abs(trDiff)) + '</td>'
         + '<td></td>'
         + '</tr>';
     }
@@ -3064,7 +3099,25 @@
         });
         _smVat.off = Math.round(off);
       })();
-      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {}, _smVat);
+      // НДС от переносов бюджета: «Перенос± ММ.ГГГГ» с месяцем решения = месяцу отчёта (бюджетный лимит, расходы).
+      var _trVat = (function() {
+        var curYM = yr * 100 + mo, tot = 0, list = [];
+        var re = /^\s*перенос\s*[+\-\u2212\u2013]?\s*(\d{1,2})\.(\d{4})/i;
+        function _f(v) { return new Intl.NumberFormat('ru-RU').format(Math.round(v || 0)); }
+        (planItems || []).forEach(function(i) {
+          var m = re.exec(i.name || '');
+          if (!m || (+m[2] * 100 + +m[1]) !== curYM) return;
+          if (i.type !== 40 || i.org_account_id !== 36) return;
+          var cn = catMap[i.category_id] || '', st = expSubType(cn);
+          var rate = st === 'mat' ? 22/122 : (st === 'smr' ? 5/105 : (getExpCatType(cn) === 'ret' ? 22/122 : 0));
+          var amt = parseFloat(i.total) || 0, v = amt * rate;
+          tot += v;
+          list.push((PID_MAP[i.project_id] || ('pid ' + i.project_id)) + ': ' + (i.name || '') + ' · ' + cn + ' ' + _f(amt)
+            + (rate ? ' × ' + (st === 'smr' ? '5/105' : '22/122') + ' = ' + _f(v) : ' · без НДС'));
+        });
+        return {sum: Math.round(tot), list: list};
+      })();
+      var _ebHtml = buildEbDetails(planItems, catMap, yr, mo, vf ? vf.effRates : {}, vf ? vf.ebPmVatMap : {}, vf ? vf.paidPmIds : {}, vf ? vf.paidPmAmts : {}, _matVatDiff, _smrVatDiff, _smrParts, vf ? vf.paidPmOuts : {}, _smVat, _trVat);
       contentEl.innerHTML = buildTable(factResult, pm, yr, mo, nextMonths, offBrkPlan, epBrkPlan, vat, finPlan, vf, today, _sd, _sdPrev, _ebHtml)
         + _vat2.html;
       var elapsed = ((Date.now() - t0) / 1000).toFixed(0);
