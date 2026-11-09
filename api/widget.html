@@ -2764,6 +2764,9 @@
       var plsItems     = results[1];
       var bankAccounts = results[2];
       var catMap       = _catMap;
+      // Полный расчёт отчёта на дату dt. prevOnly=true — только сводка (_sd) для колонки
+      // «конец прошлого месяца»: тот же алгоритм, что и отчёт, построенный на эту дату.
+      function runAt(today, yr, mo, nextMonths, prevOnly) {
       var planItems    = _planItems;
       _pmLoanCat = {};
       planItems.forEach(function(i) { if (LOAN_CATS[catMap[i.category_id] || '']) _pmLoanCat[i.id] = i.category_id; });
@@ -2943,54 +2946,10 @@
       var _vat2 = buildVatForecastTable2(vf, pm, factResult, offBrkPlan, epBrkPlan, false, _smrF);
       var _vF   = _vat2.vatFact;
 
-      // База: конец предыдущего месяца — всегда считается заново из API-данных,
-      // кеш не используется, чтобы все пользователи видели одинаковые значения.
-      var _sdPrev = null;
-      (function() {
-        var _prevMonthEnd = (function() {
-          var d = new Date(today); d.setDate(1); d.setDate(0);
-          return d.toISOString().slice(0,10);
-        })();
-        var _frP = calcFact(txns, catMap, yr, mo, _prevMonthEnd, bankAccounts);
-        // EB-позиции (org_account_id=150) не входят в прогноз прошлого месяца
-        var _planNonEB = planItems.filter(function(i) { return i.org_account_id !== 150; });
-        var _vfP = calcVatForecast(txns, _planNonEB, plsItems, catMap, yr, mo, _prevMonthEnd);
-        var _aP = _frP.acc, _fnP = _frP.fin;
-        var _sumOstP = function(type, projList) {
-          var tot = 0;
-          (projList || PROJECTS).forEach(function(p) {
-            var d = pm[p], a = _aP[p];
-            if (!d || !a) return;
-            var b = type === 'inc' ? a.i25 + (a.i26 - a.iCur) + d.bi_plan : a.e25 + (a.e26 - a.eCur) + d.be_plan;
-            var pf = type === 'inc' ? a.i25 + a.i26 : a.e25 + a.e26;
-            var pl = type === 'inc' ? d.bi_plan : d.be_plan;
-            tot += (b === 0 || !pl) ? 0 : b - pf;
-          });
-          return tot;
-        };
-        var _skInBP  = _fnP.skIn.f25  + (_fnP.skIn.f26  - _fnP.skIn.fCur)  + _fp.skIn.hI  + _skInPS;
-        var _skInOP  = (_skInBP  === 0 || (!_fp.skIn.hI  && !_skInPS))  ? 0 : _skInBP  - (_fnP.skIn.f25  + _fnP.skIn.f26);
-        var _skOutBP = _fnP.skOut.f25 + (_fnP.skOut.f26 - _fnP.skOut.fCur) + _fp.skOut.hE + _skOutPS;
-        var _skOutOP = (_skOutBP === 0 || (!_fp.skOut.hE && !_skOutPS)) ? 0 : _skOutBP - (_fnP.skOut.f25 + _fnP.skOut.f26);
-        var _pCashBal = _frP.vEnd + _frP.tEnd;
-        var _pEpIncOst = _sumOstP('inc', [_EP]);
-        var _pIncOst  = _sumOstP('inc', _projNoEP);
-        var _pExpOst  = _sumOstP('exp') - _pEpIncOst;
-        var _pFinOst  = _skInOP - _skOutOP;
-        var _vfP2     = buildVatForecastTable2(_vfP, pm, _frP, offBrkPlan, epBrkPlan, true);  // база: без внебюджета
-        var _pVatFact = _vfP2.vatFact;
-        var _pVatPlan = _vfP2.vatPlan;
-        _sdPrev = {
-          dateStr:     _prevMonthEnd.slice(8,10) + '.' + _prevMonthEnd.slice(5,7) + '.' + _prevMonthEnd.slice(0,4),
-          cashBalance: _pCashBal,
-          incOst:      _pIncOst,
-          expOst:      _pExpOst,
-          finOst:      _pFinOst,
-          vatFact:     _pVatFact,
-          vatPlan:     _pVatPlan,
-          reserve:     -(_pCashBal + _pIncOst - _pExpOst + _pFinOst + _pVatFact + _pVatPlan)
-        };
-      })();
+      // База: конец предыдущего месяца — полный расчёт отчёта на эту дату (runAt(..., prevOnly)),
+      // то есть те же правила, что в отчёте, построенном на последний день прошлого месяца
+      // (внебюджет до месяца отчёта, переносы/КБ по месяцу решения, план/факт текущего месяца, СМР rem5).
+      var _sdPrev = _prevSd;
 
       var _vP = _vat2.vatPlan;
 
@@ -3009,6 +2968,7 @@
         balTT:       factResult.tEnd,
         reserve:     -(_cashBal + _incOst - _expOst + _finNetOst + _vF + _vP)
       };
+      if (prevOnly) return _sd;
       // ────────────────────────────────────────────────────────────────────
 
       // Разница в плановом НДС от материалов:
@@ -3111,6 +3071,23 @@
       statusEl.innerHTML = '&#9679; live · ' + today.slice(8,10) + '.' + today.slice(5,7) + '.' + today.slice(0,4) + ' · ' + txns.length + ' тр. · ' + elapsed + 'с';
       statusEl.style.color = '#059669';
       loading = false;
+      }   // end runAt
+
+      // Конец прошлого месяца: отдельный полный прогон (только сводка), затем основной отчёт.
+      // Порядок важен: rebuildProjMap() меняет глобальные PROJECTS/PID_MAP — основной прогон идёт последним.
+      var _pe = new Date(today + 'T00:00:00'); _pe.setDate(1); _pe.setDate(0);
+      var _pyr = _pe.getFullYear(), _pmo = _pe.getMonth() + 1;
+      var _peStr = _pyr + '-' + pad2(_pmo) + '-' + pad2(_pe.getDate());
+      var _pNext = [];
+      for (var _k = 0; _k < 6; _k++) {
+        var _nm = _pmo + 1 + _k, _ny = _pyr;
+        if (_nm > 12) { _nm -= 12; _ny++; }
+        _pNext.push({year: _ny, month: _nm});
+      }
+      var _prevSd = null;
+      try { _prevSd = runAt(_peStr, _pyr, _pmo, _pNext, true); }
+      catch (e) { console.warn('[prev month-end]', e); _prevSd = null; }
+      runAt(today, yr, mo, nextMonths, false);
     }).catch(function(err) {
       contentEl.innerHTML = '<div style="padding:16px;color:#dc2626">&#10060; Ошибка: ' + err.message + '</div>';
       statusEl.textContent = '&#9679; ошибка';
