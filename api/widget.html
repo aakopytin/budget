@@ -2980,6 +2980,17 @@
           var pj = PID_MAP[item.project_id]; if (!pj) return;
           p0[pj] = (p0[pj] || 0) + (parseFloat(item.total) || 0);
         });
+        // План текущего месяца: с НДС (p5c) и без НДС (p0c) — для распределения факта внутри месяца
+        var p5c = {}, p0c = {};
+        (planItems || []).forEach(function(item) {
+          if (item.type !== 40 || item.org_account_id !== 36) return;
+          var dt = item.plan_paid_date || '';
+          if (dt.length < 7 || _ym(dt) !== _curYM) return;
+          var pj = PID_MAP[item.project_id]; if (!pj) return;
+          var cn = catMap[item.category_id] || '', lc = cn.toLowerCase(), v = parseFloat(item.total) || 0;
+          if (expSubType(cn) === 'smr') p5c[pj] = (p5c[pj] || 0) + v;
+          else if (/^смр/.test(lc) && lc.indexOf('без ндс') >= 0) p0c[pj] = (p0c[pj] || 0) + v;
+        });
         var P = {};
         Object.keys(G).forEach(function(gid) {
           var g = G[gid], x = P[g.pj] || (P[g.pj] = {fVat: 0, f0: 0, vat: 0});
@@ -2987,9 +2998,24 @@
           if (Math.abs(g.vat) >= 1) x.fVat += g.amt; else x.f0 += g.amt;
         });
         // Остаток бюджета СМР с НДС (без минусов): факт с НДС закрывает План5, факт без НДС — План0, превышение — другую статью.
+        // Распределение факта СМР по месяцам: сначала план своего (текущего) месяца, превышение одной статьи
+        // закрывает другую статью того же месяца, и только остаток уходит в будущие месяцы.
+        // Иначе на конец месяца превышение «СМР с НДС» съедает будущий план с НДС, а после смены месяца
+        // (прошлые строки выпадают) это вычитание пропадает и плановый НДС «прыгает».
+        function _alloc5(p5, p0, p5c, p0c, fVat, f0) {
+          var a5 = p5c, a0 = p0c, b5 = p5 - p5c, b0 = p0 - p0c;
+          var r5 = fVat - Math.min(fVat, Math.max(0, a5)); a5 -= (fVat - r5);
+          var r0 = f0 - Math.min(f0, Math.max(0, a0));     a0 -= (f0 - r0);
+          var x = Math.min(r5, Math.max(0, a0)); r5 -= x;  a0 -= x;   // превышение с НДС → план без НДС этого месяца
+          var y = Math.min(r0, Math.max(0, a5)); r0 -= y;  a5 -= y;   // превышение без НДС → план с НДС этого месяца
+          var z = Math.min(r5, Math.max(0, b5)); b5 -= z;            // остаток с НДС → будущий план с НДС
+          var w = Math.min(r0, Math.max(0, b0)); r0 -= w;            // остаток без НДС → будущий план без НДС,
+          b5 -= r0;                                                   //   сверх него — будущий план с НДС
+          return Math.max(0, a5 + b5);
+        }
         function rem5(pj) {
           var x = P[pj] || {fVat: 0, f0: 0}, p5 = (pm[pj] && pm[pj].bePlanByType && pm[pj].bePlanByType.smr) || 0, q0 = p0[pj] || 0;
-          return Math.max(0, p5 - x.fVat - Math.max(0, x.f0 - q0));
+          return _alloc5(p5, q0, p5c[pj] || 0, p0c[pj] || 0, x.fVat, x.f0);
         }
         function ebRem5(pj) {
           var e = (pm[pj] && pm[pj].beEbByType && pm[pj].beEbByType.smr) || 0;
