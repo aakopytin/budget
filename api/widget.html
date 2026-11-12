@@ -1722,7 +1722,8 @@
         else {
           // Прочие проектные расходы: плановая ставка НДС 0%, кроме возвратов покупателям —
           // по ним прежняя ставка (НДС плана «Прочие» / план «Прочие», не выше 22/122; по умолчанию proj_other или 22/122).
-          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0);
+          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0)
+                         + ((pm[p] && pm[p].beEbByType) ? (pm[p].beEbByType['other'] || 0) : 0);   // НДС плана vatPlanOth включает внебюджет
           var vatPlanOth = ((progVatOutByProjByType[p] || {})['other'] || 0);
           var rateOth    = (planOth > 0 && vatPlanOth > 0) ? Math.min(vatPlanOth / planOth, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
           stVatPr = Math.round(projRetOst2(p) * rateOth);
@@ -1829,7 +1830,8 @@
           var o5 = smrF ? (smrF.rem5(p) + (noEb ? 0 : smrF.ebRem5(p))) : projOstByType2(p, 'smr');
           v += Math.round(o5 * 5/105);
         } else if (s === 'other') {
-          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0);
+          var planOth    = ((pm[p] && pm[p].bePlanByType) ? (pm[p].bePlanByType['other'] || 0) : 0)
+                         + ((pm[p] && pm[p].beEbByType) ? (pm[p].beEbByType['other'] || 0) : 0);   // НДС плана vatPlanOth включает внебюджет
           var vatPlanOth = ((progVatOutByProjByType[p] || {})['other'] || 0);
           var rateOth    = (planOth > 0 && vatPlanOth > 0) ? Math.min(vatPlanOth / planOth, 22/122) : ((vf.effRates && vf.effRates['proj_other']) || 22/122);
           v += Math.round(projRetOst2(p) * rateOth);
