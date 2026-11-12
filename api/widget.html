@@ -1315,8 +1315,19 @@
     });
     // ebPmVatMap — реальный НДС из PLS cat=3144/3147 по ВБ-позициям
     var ebPmVatMap = {}, vfEbVatAdj = 0;
+    // PLS-строки создаются при проведении транзакции; если транзакцию привязали к плану позже,
+    // у PLS остаётся plan_money_id = 0. Восстанавливаем привязку через транзакцию с тем же
+    // документом: org_id + reference_id + type + is_storno.
+    var _refKey = function(r) { return r.org_id + '|' + r.reference_id + '|' + r.type + '|' + (+r.is_storno ? 1 : 0); };
+    var _refPm = {};
+    txns.forEach(function(tx) {
+      if (!tx.reference_id || !tx.plan_money_id || !ebPlanIds[tx.plan_money_id]) return;
+      var k = _refKey(tx);
+      _refPm[k] = (_refPm[k] === undefined || _refPm[k] === tx.plan_money_id) ? tx.plan_money_id : -1;  // -1: неоднозначно
+    });
     (plsItems || []).forEach(function(p) {
       var pmId = p.plan_money_id;
+      if (!pmId && p.reference_id) { var _rp = _refPm[_refKey(p)]; if (_rp > 0) pmId = _rp; }
       if (!pmId || !ebPlanIds[pmId]) return;
       var dt = p.date || '';
       if (today && dt > today) return;
@@ -1918,8 +1929,11 @@
       // Для расходов (type=40): PLS 3144 ведётся → доверяем PLS даже если 0 (ИП, нулевая ставка).
       // Для доходов (type=30): PLS 3144/3147 не генерируются — откатываемся к оценке по ставке.
       if (paidPmIds[item.id]) {
+        // Знак НДС = знак суммы: ebPmVatMap для расходов = 3144 outcome (сторно/возврат — отрицательный),
+        // для доходов = −3147 income. Модуль не берём, иначе у возврата НДС прибавляется к сумме.
         var vatPls = Math.round(ebPmVatMap[item.id] || 0);
-        return { net: amt - Math.abs(vatPls), vat: Math.abs(vatPls) };
+        var vatS = item.type === 40 ? vatPls : -vatPls;
+        return { net: amt - vatS, vat: vatS };
       }
       // Оценка по эффективной ставке (только для неоплаченных позиций)
       var rate;
@@ -1952,15 +1966,18 @@
       var v = ebVat(item, amt);
       var sign = isExp ? 1 : -1;
       totAmt += sign * amt; totNet += sign * v.net; totVat += sign * v.vat;
+      // Знак по движению денег: расход «−», доход/возврат расхода (сторно) «+»
+      var sgn = function(x) { var c = -sign * x; return (c < 0 ? '- ' : '+ ') + fmtFull(Math.abs(c)); };
+      var ret = isExp && amt < 0;
       return '<tr>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + dateStr + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;color:#374151;max-width:100px;overflow:hidden;text-overflow:ellipsis">' + name + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;color:#6b7280;white-space:nowrap">' + proj + '</td>'
         + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;font-weight:600;color:'
-          + (isExp ? '#dc2626' : '#15803d') + '">' 
-          + (isExp ? '- ' : '+ ') + fmtFull(amt) + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + (isExp ? '- ' : '+ ') + fmtFull(Math.abs(v.net)) + '</td>'
-        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + (isExp ? '- ' : '+ ') + fmtFull(Math.abs(v.vat)) + '</td>'
+          + ((isExp && !ret) ? '#dc2626' : '#15803d') + '">'
+          + sgn(amt) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#374151">' + sgn(v.net) + '</td>'
+        + '<td style="padding:2px 8px;font-size:10px;text-align:right;white-space:nowrap;color:#6b7280">' + sgn(v.vat) + '</td>'
         + '</tr>';
     }).join('');
 
